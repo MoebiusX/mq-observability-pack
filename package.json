@@ -1,6 +1,6 @@
 {
   "name": "mq-observability-pack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Self-contained IBM MQ observability lab: ObservabilityPack manifest, OTel-native telemetry stack, synthetic canary, chaos harness and certification report generator.",
   "type": "module",
