@@ -2,6 +2,7 @@
 import { promQuery, scalar } from '../lib/http.mjs';
 
 const R = (id, title, status, detail, evidence) => ({ id, title, status, detail, evidence });
+const durationSec = (d) => { const m = /^(\d+)(s|m|h|d)$/.exec(String(d || '')); return m ? Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[m[2]] : Infinity; };
 
 export async function synthetic(pack) {
   const out = [];
@@ -17,16 +18,40 @@ export async function synthetic(pack) {
   out.push(R('S2', 'put-get-canary: success ratio ≥ 0.99 (5m)', ok(success) && success >= 0.99 ? 'PASS' : 'FAIL', ok(success) ? `${(success * 100).toFixed(2)}%` : 'no data', { success }));
   out.push(R('S3', 'put-get-canary: p99 round-trip < 500 ms (5m)', ok(p99) && p99 < 0.5 ? 'PASS' : (ok(p99) ? 'FAIL' : 'WARN'), ok(p99) ? `p50 ${(p50 * 1000).toFixed(1)} ms, p99 ${(p99 * 1000).toFixed(1)} ms` : 'no histogram data yet', { p50, p99 }));
 
-  const produced = scalar(await promQuery('sum(rate(mq_orders_produced_total[2m]))'));
-  const consumed = scalar(await promQuery('sum(rate(mq_orders_consumed_total[2m]))'));
+  // S4 grades everything it prints: flow in both directions, no failed puts, depth and age
+  // inside the pack's SLI thresholds. Put errors alone are WARN (a chaos run minutes ago
+  // leaves them in the 5 m window); a stalled or backed-up queue is FAIL.
+  const sliById = Object.fromEntries((pack.spec.slis || []).map(s => [s.id, s]));
+  const headroomMax = Number(sliById.queue_depth_headroom?.threshold ?? 0.8);
+  const ageMax = Number(sliById.oldest_message_age?.threshold ?? 60);
+  const produced = scalar(await promQuery('sum(rate(mq_orders_produced_total[1m]))'));
+  const consumed = scalar(await promQuery('sum(rate(mq_orders_consumed_total[1m]))'));
   const putErr = scalar(await promQuery('sum(increase(mq_orders_put_errors_total[5m]))')) || 0;
-  const depth = scalar(await promQuery('max(ibmmq_queue_depth{queue="APP.ORDERS.REQ"})'));
-  const age = scalar(await promQuery('max(ibmmq_queue_oldest_message_age{queue="APP.ORDERS.REQ"})'));
-  out.push(R('S4', 'orders-flow: producer and consumer both moving', ok(produced) && ok(consumed) && produced > 0 && consumed > 0 ? 'PASS' : 'FAIL',
-    `produced ${produced?.toFixed(2)}/s, consumed ${consumed?.toFixed(2)}/s, put errors(5m)=${putErr}, depth=${depth}, oldest=${age}s`, { produced, consumed, putErr, depth, age }));
+  const depth = scalar(await promQuery('max(last_over_time(ibmmq_queue_depth{queue="APP.ORDERS.REQ"}[30s]))'));
+  const headroom = scalar(await promQuery('max(ibmmq:queue_depth_headroom:ratio{queue="APP.ORDERS.REQ"})'));
+  const age = scalar(await promQuery('max(last_over_time(ibmmq_queue_oldest_message_age{queue="APP.ORDERS.REQ"}[30s]))'));
+  const flowing = ok(produced) && ok(consumed) && produced > 0 && consumed > 0;
+  const backedUp = (ok(headroom) && headroom > headroomMax) || (ok(age) && age > ageMax);
+  const s4 = !flowing || backedUp ? 'FAIL' : (putErr > 0 ? 'WARN' : 'PASS');
+  out.push(R('S4', 'orders-flow: producer and consumer moving, no failed puts, queue within SLI thresholds', s4,
+    `produced ${produced?.toFixed(2)}/s, consumed ${consumed?.toFixed(2)}/s, put errors(5m)=${Math.round(putErr)}, depth=${depth} (headroom ${ok(headroom) ? headroom.toFixed(3) : 'n/a'} ≤ ${headroomMax}), oldest=${age}s (≤ ${ageMax}s)`,
+    { produced, consumed, putErr, depth, headroom, age }));
 
-  const firing = (await promQuery('ALERTS{alertstate="firing", pack="ibmmq"}')).result.map(r => r.metric.alertname);
-  out.push(R('S5', 'steady state: no pack alerts firing', firing.length ? 'FAIL' : 'PASS', firing.length ? `firing: ${[...new Set(firing)].join(', ')}` : 'none firing', firing));
+  // S5 judges symptom alerts only. Multi-window burn-rate alerts (spec.policy) are graded in
+  // S6: a slow window (1h/6h) legitimately keeps burning for hours after an incident such as
+  // a chaos run, which is not a steady-state defect; a fast window firing at steady state is.
+  const all = (await promQuery('ALERTS{alertstate="firing", pack="ibmmq"}')).result.map(r => r.metric);
+  const symptom = [...new Set(all.filter(m => !m.burn_rate && m.kind !== 'forecast').map(m => m.alertname))];
+  out.push(R('S5', 'steady state: no symptom alert firing', symptom.length ? 'FAIL' : 'PASS', symptom.length ? `firing: ${symptom.join(', ')}` : 'none firing', symptom));
+
+  const burn = all.filter(m => m.burn_rate);
+  const fast = [...new Set(burn.filter(m => durationSec(m.window_long) <= 3600).map(m => m.alertname))];
+  const slow = [...new Set(burn.filter(m => durationSec(m.window_long) > 3600).map(m => m.alertname))];
+  const forecast = [...new Set(all.filter(m => m.kind === 'forecast').map(m => m.alertname))];
+  out.push(R('S6', 'SLO burn: no fast-window burn-rate alert firing (slow 6h windows may still be paying for incidents of the last hours)',
+    fast.length ? 'FAIL' : (slow.length || forecast.length ? 'WARN' : 'PASS'),
+    [fast.length ? `fast: ${fast.join(', ')}` : null, slow.length ? `slow (informational): ${slow.join(', ')}` : null, forecast.length ? `forecast: ${forecast.join(', ')}` : null].filter(Boolean).join('; ') || 'no burn-rate or forecast alert firing',
+    { fast, slow, forecast }));
 
   return out;
 }

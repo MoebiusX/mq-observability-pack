@@ -1,5 +1,7 @@
-FROM node:22-alpine
+# Base image pinned by digest (CLAUDE.md rule 5): `docker buildx imagetools inspect node:22-alpine --format '{{.Manifest.Digest}}'`.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 WORKDIR /app
 COPY server.mjs .
 EXPOSE 9095
+USER node
 CMD ["node", "server.mjs"]

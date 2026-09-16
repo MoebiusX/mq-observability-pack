@@ -1,6 +1,6 @@
 # Live metric inventory — 2026-09-16
 
-Captured on the first live run of the lab (host Nitro5, Docker Desktop 29.5.3) against
+Captured on the first live run of the lab (a Windows 11 host, Docker Desktop 29.5.3) against
 `icr.io/ibm-messaging/mq:10.0.0.5-r1` (MQ 10.0.0.5, p1000-005-260828) and mq_prometheus built from
 `ibm-messaging/mq-metric-samples@v6.0.0` with `overrideCType: false`, scraped by otelcol-contrib 0.161.0 and
 remote-written into Prometheus 3.14. Regenerate with the commands in each section after a version bump and diff against this file.

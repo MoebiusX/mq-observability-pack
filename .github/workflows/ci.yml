@@ -1,27 +1,59 @@
 name: ci
 on: [push, pull_request]
+
+# Nothing here needs to write to the repository; a fork PR gets the same read-only token.
+permissions:
+  contents: read
+
+env:
+  PROM_VERSION: 3.14.0
+  AM_VERSION: 0.34.0
+  OTELCOL_VERSION: 0.161.0
+
 jobs:
   static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Actions pinned to commit SHAs (the tag comments say which release they were).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262      # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020    # v4
         with: { node-version: '22' }
       - run: npm test
       - run: node tools/check-rules.mjs
       - run: docker compose config --quiet
-      - name: promtool
+      # Every binary below is verified against the checksum file its project publishes
+      # with the release, before it is extracted or executed.
+      - name: promtool (check config, check rules, unit tests)
         run: |
-          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.14.0/prometheus-3.14.0.linux-amd64.tar.gz | tar xz --strip-components=1 prometheus-3.14.0.linux-amd64/promtool
+          set -euo pipefail
+          base=https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}
+          curl -sSLO ${base}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz
+          curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
+          tar xzf prometheus-${PROM_VERSION}.linux-amd64.tar.gz --strip-components=1 prometheus-${PROM_VERSION}.linux-amd64/promtool
           ./promtool check config stack/prometheus/prometheus.yml
           ./promtool check rules stack/prometheus/rules/*.yml
+          ./promtool test rules stack/prometheus/tests/*.yml
       - name: otelcol validate
         run: |
-          curl -sSL https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz | tar xz otelcol-contrib
+          set -euo pipefail
+          base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTELCOL_VERSION}
+          f=otelcol-contrib_${OTELCOL_VERSION}_linux_amd64.tar.gz
+          curl -sSLO ${base}/${f}
+          # the collector's per-asset .sha256 is a bare hash (no filename, no newline)
+          echo "$(curl -sSL ${base}/${f}.sha256 | tr -d '\r\n ')  ${f}" | sha256sum -c -
+          tar xzf ${f} otelcol-contrib
           ENV=lab MQ_QMGR_NAME=QM1 ./otelcol-contrib validate --config=stack/otelcol/config.yaml
       - name: amtool
         run: |
-          curl -sSL https://github.com/prometheus/alertmanager/releases/download/v0.34.0/alertmanager-0.34.0.linux-amd64.tar.gz | tar xz --strip-components=1 alertmanager-0.34.0.linux-amd64/amtool
+          set -euo pipefail
+          base=https://github.com/prometheus/alertmanager/releases/download/v${AM_VERSION}
+          curl -sSLO ${base}/alertmanager-${AM_VERSION}.linux-amd64.tar.gz
+          curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
+          tar xzf alertmanager-${AM_VERSION}.linux-amd64.tar.gz --strip-components=1 alertmanager-${AM_VERSION}.linux-amd64/amtool
           ./amtool check-config stack/alertmanager/alertmanager.yml
-      - name: dashboards are generated, not hand-edited
-        run: node tools/gen-dashboards.mjs && git diff --exit-code stack/grafana/dashboards
+      - name: generated artefacts are not hand-edited (dashboards, burn-rate rules)
+        # git diff alone cannot see a newly generated but untracked file; git status can.
+        run: |
+          node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs
+          git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
+          test -z "$(git status --porcelain stack/grafana/dashboards stack/prometheus/rules)" || { git status --porcelain stack/grafana/dashboards stack/prometheus/rules; exit 1; }

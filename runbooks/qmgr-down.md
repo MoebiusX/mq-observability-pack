@@ -8,7 +8,7 @@
 3. Confirm the blast radius: `MQCanaryFailing` and `IBMMQQueueManagerUnreachable` will follow within a minute.
 
 ## Fix
-* Crashed / OOM: `docker compose start mq` (guardrail: max 2 automated restarts per hour, human above SEV1).
+* Crashed / OOM: `docker compose start mq`. The pack declares an automation for this with a guardrail of max 2 automated restarts per hour and a human above SEV1; that is for the platform to implement — in this lab, do it by hand.
 * Volume/permission: fix the mount, then restart. Never delete `/mnt/mqm` — that is the recovery log.
 * Native HA: check quorum (`dspmq -o nativeha`) before restarting anything.
 

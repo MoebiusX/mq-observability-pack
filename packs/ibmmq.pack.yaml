@@ -21,7 +21,7 @@ kind: ObservabilityPack
 
 metadata:
   name: ibmmq
-  version: 0.1.0
+  version: 0.2.0   # 0.1.0 = static scaffold; 0.2.0 = first live certification, Tempo, spec.policy compiled to rules
   binding: otel-grafanalabs
   owners:
     - team-platform-sre
@@ -132,6 +132,18 @@ spec:
       overrides:
         storage.metrics.retention: 13mo
         otel.sdk.sampling.ratio: 0.1
+        # Timing. The lab's rule files, Alertmanager route and exporter poll are tuned for a
+        # 10 s scrape so chaos MTTD measures the pipeline (CLAUDE.md rule 7); these are the
+        # production values a promotion applies instead. Burn-rate for: are Observogram's
+        # compiler defaults by short window.
+        prometheus.scrape_interval: 30s
+        exporter.poll_interval: 30s
+        alerts.symptom.for: 2m
+        alerts.burn_rate.for.short_5m: 2m
+        alerts.burn_rate.for.short_30m: 5m
+        alerts.burn_rate.for.short_1h: 10m
+        alertmanager.group_wait: 30s
+        alertmanager.group_wait.sev1: 10s
       promote_after: 30d
     staging:
       target: bare-k8s
@@ -193,7 +205,7 @@ spec:
       query: |
         max by (qmgr, queue) (
           last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
-            / ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}
+            / last_over_time(ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
         )
       threshold: 0.8
       unit: ratio
@@ -239,7 +251,7 @@ spec:
       semconv_metric: mq.canary.roundtrip.duration
       query: |
         histogram_quantile(0.99,
-          sum by (le) (rate(mq_canary_roundtrip_duration_seconds_bucket[5m])))
+          sum by (le) (rate(mq_canary_roundtrip_duration_seconds_bucket{result="ok"}[5m])))
       threshold: 0.5
       unit: seconds
 
@@ -355,10 +367,95 @@ spec:
       - { name: ibmmq:canary_success:error_ratio_5m,     expr: 1 - ibmmq:canary_success:ratio_5m,            interval: 10s }
       - { name: ibmmq:canary_roundtrip:p99_5m,           expr: ref:slis.canary_roundtrip_p99,                interval: 10s }
       - { name: ibmmq:log_write_latency:seconds,         expr: ref:slis.log_write_latency,                   interval: 10s }
-      - { name: ibmmq:errorbudget:burn_5m,               expr: ibmmq:qmgr_process_up:error_ratio_5m / (1 - 0.999), interval: 30s, labels: { slo: qmgr_process_up_99_9 } }
-      - { name: ibmmq:errorbudget:burn_1h,               expr: ibmmq:qmgr_process_up:error_ratio_1h / (1 - 0.999), interval: 30s, labels: { slo: qmgr_process_up_99_9 } }
-      - { name: ibmmq:errorbudget:burn_5m,               expr: ibmmq:canary_success:error_ratio_5m / (1 - 0.999),  interval: 30s, labels: { slo: canary_success_99_9 } }
-      - { name: ibmmq:errorbudget:burn_1h,               expr: ibmmq:canary_success:error_ratio_1h / (1 - 0.999),  interval: 30s, labels: { slo: canary_success_99_9 } }
+      # --- error-budget rules, GENERATED from spec.policy by tools/gen-burn-rules.mjs ----
+      # ibmmq:<sli>:error_ratio_5m for threshold SLIs (fraction of the window the SLI breached
+      # its threshold) and ibmmq:errorbudget:burn_{5m,1h}{slo} for every SLO. Expressions must
+      # match stack/prometheus/rules/ibmmq.burn.yml verbatim (tools/check-rules.mjs compares);
+      # regenerate this block with `node tools/gen-burn-rules.mjs --pack-snippet`.
+      - name: ibmmq:queue_depth_headroom:error_ratio_5m
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30)'
+        interval: 30s
+        labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
+      - name: ibmmq:oldest_message_age:error_ratio_5m
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30)'
+        interval: 30s
+        labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
+      - name: ibmmq:dlq_depth:error_ratio_5m
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30)'
+        interval: 30s
+        labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
+      - name: ibmmq:canary_roundtrip_p99:error_ratio_5m
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30)'
+        interval: 30s
+        labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
+      - name: ibmmq:log_write_latency:error_ratio_5m
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30)'
+        interval: 30s
+        labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum(sum_over_time((1 - (up{job="ibmmq-native"} == bool 1))[5m:10s])) / ((count(up{job="ibmmq-native"})) * 30)) / 0.001'
+        interval: 30s
+        labels: { slo: qmgr_process_up_99_9, sli: qmgr_process_up, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum(sum_over_time((1 - (up{job="ibmmq-native"} == bool 1))[1h:10s])) / ((count(up{job="ibmmq-native"})) * 360)) / 0.001'
+        interval: 30s
+        labels: { slo: qmgr_process_up_99_9, sli: qmgr_process_up, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum(sum_over_time((1 - (ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2))[5m:10s])) / ((count(ibmmq_qmgr_status{job="ibmmq-exporter"})) * 30)) / 0.001'
+        interval: 30s
+        labels: { slo: qmgr_reachability_99_9, sli: qmgr_reachability, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum(sum_over_time((1 - (ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2))[1h:10s])) / ((count(ibmmq_qmgr_status{job="ibmmq-exporter"})) * 360)) / 0.001'
+        interval: 30s
+        labels: { slo: qmgr_reachability_99_9, sli: qmgr_reachability, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30) / 0.001'
+        interval: 30s
+        labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[1h:10s]) / 360) / 0.001'
+        interval: 30s
+        labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30) / 0.01'
+        interval: 30s
+        labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[1h:10s]) / 360) / 0.01'
+        interval: 30s
+        labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30) / 0.001'
+        interval: 30s
+        labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[1h:10s]) / 360) / 0.001'
+        interval: 30s
+        labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(((sum(increase(mq_canary_attempts_total[5m]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[5m])) or vector(0)))) / 30) / 0.001'
+        interval: 30s
+        labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(((sum(increase(mq_canary_attempts_total[1h]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)))) / 360) / 0.001'
+        interval: 30s
+        labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30) / 0.01'
+        interval: 30s
+        labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[1h:10s]) / 360) / 0.01'
+        interval: 30s
+        labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_5m
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30) / 0.01'
+        interval: 30s
+        labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
+      - name: ibmmq:errorbudget:burn_1h
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[1h:10s]) / 360) / 0.01'
+        interval: 30s
+        labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
 
     derived_views:
       - id: golden_signals_ibmmq
@@ -409,11 +506,52 @@ spec:
         - { panel: per-queue-throughput,    binds_to: ref:queries.per_queue_throughput }
         - { panel: per-channel-status,      binds_to: ref:queries.per_channel_status }
 
+    # Everything on one board (SLOs, availability, queues, channels, canary/orders, qmgr
+    # resources, alerts, logs, traces, pipeline), in the shape of the KrystalineX unified
+    # dashboard. Every SLI and SLO has a bound panel here as well.
+    - id: ibmmq-unified
+      provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
+      folder: ibmmq
+      source: file://stack/grafana/dashboards/ibmmq-unified.json
+      datasources:
+        metrics: ref:platform/ds-prometheus
+        logs:    ref:platform/ds-loki
+        traces:  ref:platform/ds-tempo
+      panel_bindings:
+        - { panel: sli-qmgr-process-up,     binds_to: slis.qmgr_process_up }
+        - { panel: sli-qmgr-reachability,   binds_to: slis.qmgr_reachability }
+        - { panel: sli-queue-headroom,      binds_to: slis.queue_depth_headroom }
+        - { panel: sli-oldest-message-age,  binds_to: slis.oldest_message_age }
+        - { panel: sli-dlq-depth,           binds_to: slis.dlq_depth }
+        - { panel: sli-canary-success,      binds_to: slis.canary_success }
+        - { panel: sli-canary-p99,          binds_to: slis.canary_roundtrip_p99 }
+        - { panel: sli-log-write-latency,   binds_to: slis.log_write_latency }
+        - { panel: slo-qmgr-process-up,     binds_to: slos.qmgr_process_up_99_9 }
+        - { panel: slo-qmgr-reachability,   binds_to: slos.qmgr_reachability_99_9 }
+        - { panel: slo-queue-headroom,      binds_to: slos.queue_headroom_99_9 }
+        - { panel: slo-message-age,         binds_to: slos.message_age_99_under_60s }
+        - { panel: slo-dlq-empty,           binds_to: slos.dlq_empty_99_9 }
+        - { panel: slo-canary-success,      binds_to: slos.canary_success_99_9 }
+        - { panel: slo-canary-latency,      binds_to: slos.canary_latency_99_p99_500ms }
+        - { panel: slo-log-latency,         binds_to: slos.log_latency_99_under_20ms }
+
+    # A real, provisioned dashboard rather than ref:platform/slo-burn-template: the lab has
+    # no platform template service, and the harness (C7) proves it is provisioned.
     - id: ibmmq-slo-burn
       provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
       folder: ibmmq
-      template: ref:platform/slo-burn-template
-      params: { slos: [ qmgr_process_up_99_9, qmgr_reachability_99_9, canary_success_99_9, message_age_99_under_60s ] }
+      source: file://stack/grafana/dashboards/ibmmq-slo-burn.json
+      datasources:
+        metrics: ref:platform/ds-prometheus
+      panel_bindings:
+        - { panel: slo-qmgr-process-up,     binds_to: slos.qmgr_process_up_99_9 }
+        - { panel: slo-qmgr-reachability,   binds_to: slos.qmgr_reachability_99_9 }
+        - { panel: slo-queue-headroom,      binds_to: slos.queue_headroom_99_9 }
+        - { panel: slo-message-age,         binds_to: slos.message_age_99_under_60s }
+        - { panel: slo-dlq-empty,           binds_to: slos.dlq_empty_99_9 }
+        - { panel: slo-canary-success,      binds_to: slos.canary_success_99_9 }
+        - { panel: slo-log-latency,         binds_to: slos.log_latency_99_under_20ms }
+        - { panel: slo-canary-latency,      binds_to: slos.canary_latency_99_p99_500ms }
 
   # ---------------------------------------------------------------------------
   # 7. Policy — multi-window burn-rate alerts (Google SRE playbook)

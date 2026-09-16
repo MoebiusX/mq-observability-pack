@@ -70,7 +70,7 @@ export async function conformance(pack) {
     refRows.push({ referenced: asWritten, alertname: rule?.name ?? null, present: !!rule, health: rule?.health ?? null, severity: rule?.labels?.severity ?? null, ok: !!rule && rule.health === 'ok' });
   }
   const badRef = refRows.filter(r => !r.ok);
-  out.push(R('C5', 'Alerts referenced by the pack (chaos + remediation) exist as Prometheus rules', badRef.length ? 'FAIL' : 'PASS',
+  out.push(R('C5', 'Alerts referenced by the pack (chaos + remediation + policy burn-rate/forecast) exist as Prometheus rules', badRef.length ? 'FAIL' : 'PASS',
     badRef.length ? `missing/unhealthy: ${badRef.map(r => r.referenced).join(', ')}` : `${refRows.length}/${refRows.length} referenced alerts present; ${alertRules.length} alert rules loaded in total`,
     { referenced: refRows, loaded: alertRules.map(r => ({ name: r.name, severity: r.labels?.severity, health: r.health, state: r.state })) }));
 

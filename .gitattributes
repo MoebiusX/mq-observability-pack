@@ -1,0 +1,11 @@
+# Every config here is bind-mounted into Linux containers and parsed there (Dockerfiles,
+# MQSC, YAML, secrets). A Windows clone with core.autocrlf=true would check them out as
+# CRLF, and a Dockerfile with CRLF fails to parse at the first backslash continuation
+# ("unknown instruction: &&"). Force LF on every checkout, on every platform.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

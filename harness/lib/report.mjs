@@ -2,15 +2,23 @@
 // Status colours follow a fixed status palette and are never the only carrier of
 // meaning (icon + label always accompany them).
 
-const ICON = { PASS: '✔', WARN: '▲', FAIL: '✖', SKIP: '–' };
+const ICON = { PASS: '✔', WARN: '▲', FAIL: '✖', SKIP: '–', ERROR: '⨯' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Markdown table cells: a '|' in an error message would shift every column; '<' would be raw HTML.
+const md = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/</g, '&lt;').replace(/\r?\n/g, ' ');
 const secs = (ms) => (ms == null ? '—' : `${(ms / 1000).toFixed(1)}s`);
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : '—');
 
+/**
+ * Verdict: FAIL if any check failed or a requested suite produced no checks at all (a typo in
+ * --only/--scenario must not certify); WARN if any check warned or was skipped (an experiment
+ * without a fault implementation is not a pass); ERROR when the harness itself broke.
+ */
 export function verdictOf(r) {
+  if (r.error) return 'ERROR';
   const all = [...r.conformance, ...r.synthetic, ...r.chaos];
-  if (all.some(x => x.status === 'FAIL')) return 'FAIL';
-  if (all.some(x => x.status === 'WARN')) return 'WARN';
+  if (all.some(x => x.status === 'FAIL') || (r.emptySuites?.length ?? 0) > 0) return 'FAIL';
+  if (all.some(x => x.status === 'WARN' || x.status === 'SKIP')) return 'WARN';
   return 'PASS';
 }
 
@@ -28,6 +36,8 @@ export function renderMarkdown(r) {
   L.push('');
   L.push(`**Verdict: ${ICON[v]} ${v}** — pack \`${r.pack.metadata.name}@${r.pack.metadata.version}\` (spec ${r.pack.apiVersion}), run ${r.startedAt} → ${r.finishedAt} (${secs(r.durationMs)})`);
   L.push('');
+  if (r.error) { L.push(`**The harness failed before reaching a verdict:** ${md(r.error.message)}`); L.push(''); }
+  if (r.emptySuites?.length) { L.push(`**Requested suite(s) produced no checks:** ${r.emptySuites.join(', ')} — verdict forced to FAIL.`); L.push(''); }
   L.push(`| Suite | PASS | WARN | FAIL | SKIP |`);
   L.push(`|---|---:|---:|---:|---:|`);
   for (const [name, list] of [['Conformance', r.conformance], ['Synthetic', r.synthetic], ['Chaos', r.chaos]]) {
@@ -44,7 +54,7 @@ export function renderMarkdown(r) {
   L.push('');
   L.push(`| # | Check | Result | Detail |`);
   L.push(`|---|---|---|---|`);
-  for (const c of r.conformance) L.push(`| ${c.id} | ${c.title} | ${ICON[c.status]} ${c.status} | ${c.detail} |`);
+  for (const c of r.conformance) L.push(`| ${c.id} | ${md(c.title)} | ${ICON[c.status]} ${c.status} | ${md(c.detail)} |`);
   L.push('');
   const c3 = r.conformance.find(c => c.id === 'C3');
   if (c3?.evidence?.length) {
@@ -59,7 +69,7 @@ export function renderMarkdown(r) {
   L.push('');
   L.push(`| # | Check | Result | Detail |`);
   L.push(`|---|---|---|---|`);
-  for (const c of r.synthetic) L.push(`| ${c.id} | ${c.title} | ${ICON[c.status]} ${c.status} | ${c.detail} |`);
+  for (const c of r.synthetic) L.push(`| ${c.id} | ${md(c.title)} | ${ICON[c.status]} ${c.status} | ${md(c.detail)} |`);
   L.push('');
   L.push(`## 3. Chaos — do the alerts fire, in time, and resolve?`);
   L.push('');
@@ -67,13 +77,13 @@ export function renderMarkdown(r) {
   for (const x of r.chaos) {
     L.push(`### ${ICON[x.status]} ${x.status} — \`${x.id}\` (target: ${x.target}, SLO: \`${x.slo}\`)`);
     L.push('');
-    L.push(`Fault \`${JSON.stringify(x.fault)}\` injected ${x.injectedAt ?? '—'}, recovered ${x.recoveredAt ?? '—'}. SLI before/during/after: ${fmtSli(x.sliBefore)} / ${fmtSli(x.sliDuring)} / ${fmtSli(x.sliAfter)}.`);
+    L.push(`Fault \`${JSON.stringify(x.fault)}\` injected ${x.injectedAt ?? '—'}, recovered ${x.recoveredAt ?? '—'}${x.heldMs != null ? ` (held ${secs(x.heldMs)})` : ''}. ${hypLine(x)}`);
     L.push('');
-    L.push(`| Expected alert | Fired | MTTD | Target | Resolved after recovery |`);
-    L.push(`|---|---|---:|---:|---:|`);
-    for (const a of x.alerts) L.push(`| ${a.alertname} | ${a.fired ? 'yes' : '**no**'} | ${secs(a.mttdMs)} | ${secs(x.expectedMttdMs)} | ${secs(a.resolvedAfterMs)} |`);
-    if (x.others?.length) L.push(`\nAlso fired during the fault: ${x.others.map(o => `\`${o}\``).join(', ')}`);
-    if (x.notes?.length) L.push(`\nNotes: ${x.notes.join('; ')}`);
+    L.push(`| Expected alert | Fired at | MTTD | Target | Resolved at | After recovery |`);
+    L.push(`|---|---|---:|---:|---|---:|`);
+    for (const a of x.alerts) L.push(`| ${md(a.alertname)} | ${a.fired ? md(a.firedAt) : '**not fired**'} | ${secs(a.mttdMs)} | ${secs(x.expectedMttdMs)} | ${md(a.resolvedAt ?? '—')} | ${secs(a.resolvedAfterMs)} |`);
+    if (x.others?.length) L.push(`\nAlso fired during the fault: ${x.others.map(o => `\`${md(o)}\``).join(', ')}`);
+    if (x.notes?.length) L.push(`\nNotes: ${md(x.notes.join('; '))}`);
     L.push('');
   }
   L.push(`## 4. Pack summary`);
@@ -90,6 +100,13 @@ export function renderMarkdown(r) {
 }
 
 const fmtSli = (v) => (v == null || Number.isNaN(v) ? '—' : Number(v).toPrecision(3));
+/** "SLI worst value before/during/after" with the bound it is judged against. */
+function hypLine(x) {
+  const h = x.hypothesis;
+  if (!h || !h.before) return `SLI before/during/after: ${fmtSli(x.sliBefore)} / ${fmtSli(x.sliDuring)} / ${fmtSli(x.sliAfter)}.`;
+  const mark = (s) => (s == null ? '—' : `${fmtSli(s.value)}${s.holds == null ? '' : s.holds ? ' ✔' : ' ✖'}`);
+  return `Hypothesis SLI (worst series) before/during/after: ${mark(h.before)} / ${mark(h.during)} / ${mark(h.after)} against ${fmtSli(h.before.bound)} (✔ holds, ✖ violated; PASS needs ✔ / ✖ / ✔).`;
+}
 
 // ---------------------------------------------------------------------- HTML
 export function renderHtml(r) {
@@ -102,7 +119,7 @@ export function renderHtml(r) {
   const chaosHtml = r.chaos.length ? r.chaos.map(x => `
     <section class="card">
       <h3>${badge(x.status)} <code>${esc(x.id)}</code> <span class="muted">target ${esc(x.target)} · SLO <code>${esc(x.slo)}</code></span></h3>
-      <p class="muted">Fault <code>${esc(JSON.stringify(x.fault))}</code> · injected ${esc(x.injectedAt)} · recovered ${esc(x.recoveredAt)} · SLI before/during/after ${fmtSli(x.sliBefore)} / ${fmtSli(x.sliDuring)} / ${fmtSli(x.sliAfter)}</p>
+      <p class="muted">Fault <code>${esc(JSON.stringify(x.fault))}</code> · injected ${esc(x.injectedAt)} · recovered ${esc(x.recoveredAt)}${x.heldMs != null ? ` (held ${secs(x.heldMs)})` : ''} · ${esc(hypLine(x))}</p>
       <table><thead><tr><th>Expected alert</th><th>Fired</th><th>MTTD vs target (${secs(x.expectedMttdMs)})</th><th>Resolved after recovery</th></tr></thead><tbody>
       ${x.alerts.map(a => `<tr><td class="mono">${esc(a.alertname)}</td><td>${a.fired ? 'yes' : '<strong>no</strong>'}</td>
         <td><div class="bar" title="MTTD ${secs(a.mttdMs)} · target ${secs(x.expectedMttdMs)}"><div class="fill ${a.fired ? (a.withinTarget ? 'ok' : 'late') : 'none'}" style="width:${a.mttdMs ? Math.min(100, a.mttdMs / maxMttd * 100) : 0}%"></div><div class="target" style="left:${Math.min(100, x.expectedMttdMs / maxMttd * 100)}%"></div></div><span class="mono">${secs(a.mttdMs)}</span></td>
@@ -133,6 +150,8 @@ table{width:100%;border-collapse:collapse;background:var(--surface)}th,td{text-a
 </style></head><body><main>
 <h1>IBM MQ Observability Certification</h1>
 <p class="muted">Pack <code>${esc(r.pack.metadata.name)}@${esc(r.pack.metadata.version)}</code> · ${esc(r.pack.apiVersion)} · run ${esc(r.startedAt)} → ${esc(r.finishedAt)} (${secs(r.durationMs)}) · host ${esc(r.environment.host)}</p>
+${r.error ? `<p class="note"><strong>The harness failed before reaching a verdict:</strong> ${esc(r.error.message)}</p>` : ''}
+${r.emptySuites?.length ? `<p class="note"><strong>Requested suite(s) produced no checks:</strong> ${esc(r.emptySuites.join(', '))} — verdict forced to FAIL.</p>` : ''}
 <div class="hero">
   <div class="tile"><div class="k">Verdict</div><div class="v">${badge(v)}</div></div>
   <div class="tile"><div class="k">Conformance</div><div class="v">${counts(r.conformance).PASS}/${r.conformance.length} <span class="muted" style="font-size:13px">pass</span></div></div>
@@ -160,6 +179,6 @@ ${chaosHtml}
 <table><thead><tr><th>SLO</th><th>SLI</th><th>Objective</th><th>Window</th></tr></thead><tbody>${r.pack.spec.slos.map(s => `<tr><td class="mono">${esc(s.id)}</td><td class="mono">${esc(s.sli)}</td><td class="mono">${esc(s.objective)}</td><td>${esc(s.window)}</td></tr>`).join('')}</tbody></table>
 <p class="muted">Baselines: MTTD p50/p95 ${esc(r.pack.spec.baselines.mttd_target_p50)}/${esc(r.pack.spec.baselines.mttd_target_p95)} · MTTR p50/p95 ${esc(r.pack.spec.baselines.mttr_target_p50)}/${esc(r.pack.spec.baselines.mttr_target_p95)} · regression gate <code>${esc(r.pack.spec.baselines.regression_gate)}</code></p>
 
-<footer>Generated by <code>harness/run.mjs</code>. Raw evidence (every query result, every webhook event) is in <code>cert-report.json</code> next to this file.</footer>
+<footer>Generated by <code>harness/run.mjs</code>. Raw evidence (check evidence, per-experiment hypothesis samples and the alert-sink events each experiment was judged from) is in <code>cert-report.json</code> next to this file.</footer>
 </main></body></html>`;
 }

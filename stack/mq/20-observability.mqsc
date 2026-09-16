@@ -26,7 +26,15 @@ SET AUTHREC OBJTYPE(QMGR) PRINCIPAL('app') AUTHADD(CONNECT,INQ,DSP)
 * Larger MAXHANDS: mq_prometheus opens one subscription per monitored queue x class.
 ALTER QMGR MAXHANDS(2048)
 
+* --- $SYS/MQ monitoring publications must never reach the dead-letter queue. SYSTEM.ADMIN.TOPIC
+* ships with USEDLQ(YES) and the whole $SYS subtree inherits it (DIS TPSTATUS shows it), so an
+* exporter that stops being scraped fills its temporary reply queue (MAXDEPTH 5000, ~20 min)
+* and every further publication is dead-lettered at ~4/s: a false IBMMQDeadLetterQueueNotEmpty
+* on a healthy queue manager (seen live on 2026-09-16). NPMSGDLV(ALLAVAIL) then discards the
+* undeliverable non-persistent copy instead.
+ALTER TOPIC('SYSTEM.ADMIN.TOPIC') USEDLQ(NO)
+
 * --- Listener: the image creates the qmgr with `crtmqm -p 1414`, i.e. SYSTEM.LISTENER.TCP.1
 * CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name plus
-* STOP CHANNEL(...) MODE(FORCE) on both DEV.*.SVRCONN channels: stopping the listener alone
+* STOP CHANNEL(...) MODE(FORCE) on DEV.APP.SVRCONN and DEV.ADMIN.SVRCONN: stopping the listener alone
 * leaves established client conversations working.

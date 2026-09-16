@@ -1,6 +1,6 @@
 # MQCanaryFailing (SEV1)
 
-**Signal:** fewer than half of the synthetic put/get round-trips on `APP.CANARY` succeeded over 2 minutes, or the canary metric is absent.
+**Signal:** no synthetic put/get round-trip on `APP.CANARY` has succeeded for 40 s (4 consecutive 10 s probes) while probes continue, or the canary metric is absent, or no probe of any kind has completed in 2 minutes (the canary is hung inside an MQI call).
 
 ## Triage
 Look at the `result` label breakdown (`sum by (result)(rate(mq_canary_attempts_total[2m]))`):
