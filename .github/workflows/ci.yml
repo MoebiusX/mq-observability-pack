@@ -51,4 +51,8 @@ jobs:
           tar xzf alertmanager-${AM_VERSION}.linux-amd64.tar.gz --strip-components=1 alertmanager-${AM_VERSION}.linux-amd64/amtool
           ./amtool check-config stack/alertmanager/alertmanager.yml
       - name: generated artefacts are not hand-edited (dashboards, burn-rate rules)
-        run: node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs && git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
+        # git diff alone cannot see a newly generated but untracked file; git status can.
+        run: |
+          node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs
+          git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
+          test -z "$(git status --porcelain stack/grafana/dashboards stack/prometheus/rules)" || { git status --porcelain stack/grafana/dashboards stack/prometheus/rules; exit 1; }
