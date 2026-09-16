@@ -19,7 +19,7 @@ Static (no Docker; this is what CI runs):
 npm test                        # node --check on 3 entrypoints + pack schema validation (there are no unit tests)
 node tools/check-rules.mjs      # pack <-> rules <-> dashboards cross-check
 npm run validate                # validate-pack + docker compose config + check-rules
-npm run dashboards              # regenerate stack/grafana/dashboards/*.json; CI fails on a non-empty git diff
+npm run generate                # regenerate dashboards + stack/prometheus/rules/ibmmq.burn.yml from the pack; CI fails on a non-empty git diff
 promtool check config stack/prometheus/prometheus.yml && promtool check rules stack/prometheus/rules/*.yml
 ENV=lab MQ_QMGR_NAME=QM1 otelcol-contrib validate --config stack/otelcol/config.yaml   # config uses ${env:...}
 amtool check-config stack/alertmanager/alertmanager.yml
@@ -55,8 +55,11 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
 1. **Pack and stack must not drift.** Any change to an SLI, recording rule, alert or
    dashboard binding is a change in BOTH `packs/ibmmq.pack.yaml` and the matching
    file under `stack/`. `node tools/check-rules.mjs` must stay green.
-2. **Dashboards are generated.** Edit `tools/gen-dashboards.mjs`, run `npm run
-   dashboards`; never hand-edit `stack/grafana/dashboards/*.json`.
+2. **Dashboards and burn-rate rules are generated.** Edit `tools/gen-dashboards.mjs` or
+   change the pack's `spec.policy`, then `npm run generate`; never hand-edit
+   `stack/grafana/dashboards/*.json` or `stack/prometheus/rules/ibmmq.burn.yml`. When
+   the generated recording rules change, paste `node tools/gen-burn-rules.mjs
+   --pack-snippet` into `spec.queries.recording_rules` (check-rules compares them).
 3. **No new npm dependencies in `harness/`** (Node >= 20 built-ins only). `canary/`
    may depend on `ibmmq` and `@opentelemetry/*` only.
 4. **Vendored code is read-only**: `vendor/observogram/` is refreshed by copying
@@ -137,6 +140,12 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   `sli: <id>` (`slo: <id>` for burn-rate rules). Synthetic S5, the dashboard
   alert annotation and the "Firing pack alerts" panel all query `ALERTS{pack="ibmmq"}`,
   so an alert without that label is invisible to them.
+- Policy: every `spec.policy.burn_rate_alerts[].windows[]` entry must exist as the alert
+  `<slo>_burn_<factor>x_<short>_<long>` (Observogram compiler naming, labels
+  `slo/sli/service/burn_rate/window_short/window_long`) and every forecast as
+  `<slo>_forecast_breach`; `tools/gen-burn-rules.mjs` emits them, check-rules and C5
+  require them. S5 grades symptom alerts, S6 burn-rate alerts (fast window FAIL, slow
+  1h/6h window WARN: those legitimately keep burning for hours after any incident).
 - Conformance C6 has a hard-coded list of required metric families in
   `harness/checks/conformance.mjs`; changing which metrics an SLI depends on means
   updating that list too.
@@ -179,10 +188,12 @@ that ends with `tail` reports `tail`'s exit code, not the command's.
   at it; run check-rules.
 - **New chaos experiment**: pack entry + `faults[<id>]` in `harness/checks/chaos.mjs`
   + any MQ object it needs in the MQSC file; expected alerts must already exist.
-- **New SLI**: pack `slis[]` + recording rule (both files) + dashboard panel with
-  `binds` + `panel_bindings` + C6 family list if it introduces a metric + evidence in
-  `docs/catalogue-evidence/ibmmq.md` if the metric name is new (the live inventory is
-  `docs/catalogue-evidence/ibmmq-live-metrics-2026-09-16.md`).
+- **New SLI/SLO**: pack `slis[]` + `slos[]` + a `policy.burn_rate_alerts` entry (two
+  windows) + recording rule (both files; threshold SLIs need a `ref:slis.<id>` recording
+  rule because the burn generator reads the SLI from it) + `npm run generate` + the
+  `--pack-snippet` paste + dashboard panel with `binds` + `panel_bindings` + C6 family
+  list if it introduces a metric + evidence in `docs/catalogue-evidence/ibmmq.md` if the
+  metric name is new (the live inventory is `docs/catalogue-evidence/ibmmq-live-metrics-2026-09-16.md`).
 
 ## Validation before every push
 ```
@@ -190,7 +201,7 @@ npm test && node tools/check-rules.mjs && docker compose config --quiet
 promtool check rules stack/prometheus/rules/*.yml
 ENV=lab MQ_QMGR_NAME=QM1 otelcol-contrib validate --config stack/otelcol/config.yaml
 amtool check-config stack/alertmanager/alertmanager.yml
-npm run dashboards && git diff --exit-code stack/grafana/dashboards
+npm run generate && git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
 ```
 Then, when the change touches anything under `stack/`, `canary/` or `harness/`:
 `npm run certify:quick` against the live stack, and `npm run certify` for chaos changes.

@@ -30,8 +30,8 @@ build context on Windows.
 |---|---|---|
 | L1 Contract — 8 SLIs, 8 SLOs | PromQL over `ibmmq_*` (mq_prometheus), `up{job="ibmmq-native"}`, `mq_canary_*` | `packs/ibmmq.pack.yaml` |
 | L2 Telemetry | OTel Collector 0.161 (prometheus + filelog + OTLP receivers → remote-write, Loki OTLP, Tempo OTLP) | `stack/otelcol/config.yaml` |
-| L3 Insight | 13 recording rules, 2 provisioned Grafana dashboards bound to SLIs | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
-| L4 Action | 13 alert rules (SEV1-3), Alertmanager → webhook ledger, 5 runbooks with guardrails | `stack/prometheus/rules/ibmmq.alerts.yml`, `runbooks/` |
+| L3 Insight | 11 SLI recording rules + 21 error-budget rules generated from the policy, 3 provisioned Grafana dashboards bound to SLIs/SLOs | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
+| L4 Action | 11 symptom alerts + 14 multi-window burn-rate alerts + 3 forecast alerts (the latter two generated from `spec.policy`), Alertmanager → webhook ledger, 6 runbooks with guardrails | `stack/prometheus/rules/ibmmq.alerts.yml`, `ibmmq.burn.yml`, `runbooks/` |
 | L5 Validation | canary + orders flow, 5 chaos experiments, MTTD/MTTR measurement, report | `canary/`, `harness/` |
 
 ### The differential-diagnosis idea
@@ -75,8 +75,9 @@ Exit code 0 PASS · 1 WARN · 2 FAIL. Checks:
   logs parsed in Loki and app logs carry `trace_id`; Tempo has the three services
   and consumer `receive` spans carry a span link to a producer trace (context
   propagated through MQ message properties); collector export counters.
-* **Synthetic S1-S5** — canary volume, success ≥ 99 %, p99 < 500 ms, orders flowing,
-  no pack alert firing.
+* **Synthetic S1-S6** — canary volume, success ≥ 99 %, p99 < 500 ms, orders flowing,
+  no symptom alert firing, no fast-window burn-rate alert firing (slow 6 h windows may
+  still be paying for earlier incidents and only WARN).
 * **Chaos** — for each `validation.chaos_experiments[]` in the pack: wait for steady
   state, inject, wait for each `expected_alerts` entry in the webhook ledger (MTTD =
   webhook receipt − injection), hold for `fault.duration`, recover, wait for the
@@ -94,7 +95,8 @@ Exit code 0 PASS · 1 WARN · 2 FAIL. Checks:
 
 ```
 npm test                       # syntax + pack schema
-node tools/check-rules.mjs     # pack ↔ rules ↔ dashboards cross-check
+node tools/check-rules.mjs     # pack ↔ rules ↔ dashboards ↔ policy cross-check
+npm run generate               # regenerate dashboards and the burn-rate rules from the pack (CI diffs them)
 docker compose config --quiet
 promtool check rules stack/prometheus/rules/*.yml
 otelcol-contrib validate --config stack/otelcol/config.yaml
@@ -118,7 +120,7 @@ packs/ibmmq.pack.yaml          the contract
 stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
-tools/                         validate-pack, check-rules, gen-dashboards
+tools/                         validate-pack, check-rules, gen-dashboards, gen-burn-rules (spec.policy → Prometheus alerts)
 docs/                          ARCHITECTURE, CERTIFICATION, catalogue-evidence/ibmmq.md
 runbooks/                      one per remediation trigger
 vendor/observogram/            pack schema + validator (lifted from Observogram)

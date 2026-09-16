@@ -113,6 +113,30 @@ const queues = dashboard('ibmmq-queues', 'IBM MQ — Queues & Channels', [
   ], { unit: 'ops', x: 12, y: 32 }),
 ], ['ibmmq', 'pack']);
 
+// ---------------------------------------------------------------- slo burn
+// One stat per SLO (bound to slos.<id>) reading the generated ibmmq:errorbudget:burn_1h
+// series, the fast/slow burn curves for all SLOs, and the burn-rate/forecast alert state.
+nextId = 1;
+const SLOS = [
+  ['qmgr_process_up_99_9', 'QMgr process up 99.9%'], ['qmgr_reachability_99_9', 'QMgr reachable 99.9%'],
+  ['queue_headroom_99_9', 'Queue headroom 99.9%'], ['message_age_99_under_60s', 'Message age <60s 99%'],
+  ['dlq_empty_99_9', 'DLQ empty 99.9%'], ['canary_success_99_9', 'Canary success 99.9%'],
+  ['log_latency_99_under_20ms', 'Log latency <20ms 99%'],
+];
+const sloBurn = dashboard('ibmmq-slo-burn', 'IBM MQ — SLO burn rates', [
+  ...SLOS.map(([id, title], i) => stat(`${title} · burn 1h`, `ibmmq:errorbudget:burn_1h{slo="${id}"}`,
+    { binds: `slos.${id}`, thresholds: green(14, 6), x: (i % 6) * 4, y: Math.floor(i / 6) * 4, decimals: 1 })),
+  stat('Burn-rate alerts firing', 'count(ALERTS{alertstate="firing", pack="ibmmq", burn_rate!=""}) or vector(0)', { thresholds: green(1, 1), x: 4, y: 4 }),
+  ts('Burn rate · fast window (5m)', [{ expr: 'ibmmq:errorbudget:burn_5m', legend: '{{slo}}' }], { x: 0, y: 8 }),
+  ts('Burn rate · slow window (1h)', [{ expr: 'ibmmq:errorbudget:burn_1h', legend: '{{slo}}' }], { x: 12, y: 8 }),
+  ts('Error ratio · 5m, per SLI', [{ expr: '{__name__=~"ibmmq:.*:error_ratio_5m"}', legend: '{{__name__}}' }], { unit: 'percentunit', x: 0, y: 16 }),
+  ts('Burn-rate / forecast alerts (1 = pending, 2 = firing)', [
+    { expr: '(2 * max by (alertname) (ALERTS{pack="ibmmq", alertstate="firing", burn_rate!=""})) or max by (alertname) (ALERTS{pack="ibmmq", alertstate="pending", burn_rate!=""})', legend: '{{alertname}}' },
+    { expr: '(2 * max by (alertname) (ALERTS{pack="ibmmq", alertstate="firing", kind="forecast"})) or max by (alertname) (ALERTS{pack="ibmmq", alertstate="pending", kind="forecast"})', legend: '{{alertname}}' },
+  ], { min: 0, max: 2, x: 12, y: 16, legend: 'table' }),
+], ['ibmmq', 'pack', 'slo']);
+
 writeFileSync('stack/grafana/dashboards/ibmmq-overview.json', JSON.stringify(overview, null, 2) + '\n');
 writeFileSync('stack/grafana/dashboards/ibmmq-queues.json', JSON.stringify(queues, null, 2) + '\n');
+writeFileSync('stack/grafana/dashboards/ibmmq-slo-burn.json', JSON.stringify(sloBurn, null, 2) + '\n');
 console.log('dashboards written');

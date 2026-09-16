@@ -116,22 +116,5 @@ groups:
         annotations:
           summary: "Queue manager filesystem below 15% free on {{ $labels.qmgr }}"
 
-  - name: ibmmq.burnrate
-    interval: 30s
-    rules:
-      - alert: IBMMQAvailabilityBurnFast
-        expr: |
-          ibmmq:errorbudget:burn_5m{slo="qmgr_process_up_99_9"} > 14
-            and ibmmq:errorbudget:burn_1h{slo="qmgr_process_up_99_9"} > 14
-        for: 30s
-        labels: { severity: SEV1, pack: ibmmq, slo: qmgr_process_up_99_9 }
-        annotations:
-          summary: "Availability SLO burning >14x (5m & 1h windows)"
-      - alert: MQCanarySuccessBurnFast
-        expr: |
-          ibmmq:errorbudget:burn_5m{slo="canary_success_99_9"} > 14
-            and ibmmq:errorbudget:burn_1h{slo="canary_success_99_9"} > 14
-        for: 30s
-        labels: { severity: SEV1, pack: ibmmq, slo: canary_success_99_9 }
-        annotations:
-          summary: "Canary-success SLO burning >14x (5m & 1h windows)"
+  # Burn-rate and forecast alerts (spec.policy) live in ibmmq.burn.yml, GENERATED from the
+  # pack by tools/gen-burn-rules.mjs — one alert per declared window, for every SLO.

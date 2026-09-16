@@ -2,6 +2,7 @@
 import { promQuery, scalar } from '../lib/http.mjs';
 
 const R = (id, title, status, detail, evidence) => ({ id, title, status, detail, evidence });
+const durationSec = (d) => { const m = /^(\d+)(s|m|h|d)$/.exec(String(d || '')); return m ? Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[m[2]] : Infinity; };
 
 export async function synthetic(pack) {
   const out = [];
@@ -25,8 +26,21 @@ export async function synthetic(pack) {
   out.push(R('S4', 'orders-flow: producer and consumer both moving', ok(produced) && ok(consumed) && produced > 0 && consumed > 0 ? 'PASS' : 'FAIL',
     `produced ${produced?.toFixed(2)}/s, consumed ${consumed?.toFixed(2)}/s, put errors(5m)=${putErr}, depth=${depth}, oldest=${age}s`, { produced, consumed, putErr, depth, age }));
 
-  const firing = (await promQuery('ALERTS{alertstate="firing", pack="ibmmq"}')).result.map(r => r.metric.alertname);
-  out.push(R('S5', 'steady state: no pack alerts firing', firing.length ? 'FAIL' : 'PASS', firing.length ? `firing: ${[...new Set(firing)].join(', ')}` : 'none firing', firing));
+  // S5 judges symptom alerts only. Multi-window burn-rate alerts (spec.policy) are graded in
+  // S6: a slow window (1h/6h) legitimately keeps burning for hours after an incident such as
+  // a chaos run, which is not a steady-state defect; a fast window firing at steady state is.
+  const all = (await promQuery('ALERTS{alertstate="firing", pack="ibmmq"}')).result.map(r => r.metric);
+  const symptom = [...new Set(all.filter(m => !m.burn_rate && m.kind !== 'forecast').map(m => m.alertname))];
+  out.push(R('S5', 'steady state: no symptom alert firing', symptom.length ? 'FAIL' : 'PASS', symptom.length ? `firing: ${symptom.join(', ')}` : 'none firing', symptom));
+
+  const burn = all.filter(m => m.burn_rate);
+  const fast = [...new Set(burn.filter(m => durationSec(m.window_long) <= 3600).map(m => m.alertname))];
+  const slow = [...new Set(burn.filter(m => durationSec(m.window_long) > 3600).map(m => m.alertname))];
+  const forecast = [...new Set(all.filter(m => m.kind === 'forecast').map(m => m.alertname))];
+  out.push(R('S6', 'SLO burn: no fast-window burn-rate alert firing (slow windows may still be paying for earlier incidents)',
+    fast.length ? 'FAIL' : (slow.length || forecast.length ? 'WARN' : 'PASS'),
+    [fast.length ? `fast: ${fast.join(', ')}` : null, slow.length ? `slow (informational): ${slow.join(', ')}` : null, forecast.length ? `forecast: ${forecast.join(', ')}` : null].filter(Boolean).join('; ') || 'no burn-rate or forecast alert firing',
+    { fast, slow, forecast }));
 
   return out;
 }

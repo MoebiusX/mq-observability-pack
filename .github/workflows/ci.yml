@@ -23,5 +23,5 @@ jobs:
         run: |
           curl -sSL https://github.com/prometheus/alertmanager/releases/download/v0.34.0/alertmanager-0.34.0.linux-amd64.tar.gz | tar xz --strip-components=1 alertmanager-0.34.0.linux-amd64/amtool
           ./amtool check-config stack/alertmanager/alertmanager.yml
-      - name: dashboards are generated, not hand-edited
-        run: node tools/gen-dashboards.mjs && git diff --exit-code stack/grafana/dashboards
+      - name: generated artefacts are not hand-edited (dashboards, burn-rate rules)
+        run: node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs && git diff --exit-code stack/grafana/dashboards stack/prometheus/rules

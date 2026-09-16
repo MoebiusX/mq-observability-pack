@@ -86,3 +86,11 @@ Same envelope as the Kafka reference (max invocations, human-above-severity, coo
 
 ## 7. Semconv note
 `messaging.system = "ibmmq"` is not in the semconv 1.27 well-known list (S11 lists activemq, jms, kafka, rabbitmq, …); it is used as an open-enum value, consistent with how IBM's own instrumentation names the system.
+
+## 8. Burn-rate policy → Prometheus rules
+The spec maps `spec.policy.burn_rate_alerts` to Prometheus alerting rules (spec v1.2 §"targets") and the maturity model requires an alert rule per SLO. `tools/gen-burn-rules.mjs` generates `stack/prometheus/rules/ibmmq.burn.yml` from the pack — 14 multi-window burn-rate alerts (one per declared window, S12), 3 forecast alerts and the error-budget recording rules — using the names, labels and grouping of Observogram's compiler (`tools/lib/compile.mjs`: `<slo>_burn_<factor>x_<short>_<long>`, labels `slo/sli/service/burn_rate/window_short/window_long`, `<slo>_forecast_breach`), so the lab's rule file is what the platform compiler would emit. Two deliberate extensions, because that compiler only handles rate-style ratio SLIs:
+
+* **State-style ratio SLIs** (`good: sum(up == bool 1)`, `sum(ibmmq_qmgr_status == bool 2)`): the error ratio over window *w* is `1 - sum(avg_over_time((<state> == bool 1)[w:10s])) / count(<state>)`, the time-averaged availability, rather than a `rate()` wrap that would not parse.
+* **Threshold SLIs**: the error ratio over *w* is the fraction of the window in which the SLI breached its threshold, `avg_over_time((max(<recorded SLI>) > bool <threshold>)[w:10s])`, computed on the recorded SLI series (which already bridge exporter publication gaps). This is the standard "time-based SLO" reading of a threshold objective ("99 % of the time, message age < 60 s").
+
+Burn threshold = `factor × (1 − objective)`; both windows must exceed it (S12). Lab `for:` is 30 s / 2 m / 5 m by short window (the compiler's production defaults are 2 m / 5 m / 10 m). Slow windows (1 h / 6 h) keep firing for hours after any incident by design; the harness therefore grades symptom alerts (S5) and burn-rate alerts (S6, fast windows FAIL, slow windows WARN) separately. `tools/check-rules.mjs` fails when a policy window or forecast has no matching alert rule or when a pack recording expression differs from the stack.

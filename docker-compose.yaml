@@ -101,8 +101,8 @@ services:
       - "127.0.0.1:23133:13133"  # health_check
     depends_on:
       # Scrape mq:9157 only once the queue manager is ready: otherwise a fresh start records
-      # a minute of up{job="ibmmq-native"}=0 that burns the 1h error budget and fires
-      # IBMMQAvailabilityBurnFast on a healthy stack.
+      # a minute of up{job="ibmmq-native"}=0 that burns the 1h error budget and fires the
+      # availability burn-rate alert on a healthy stack.
       mq:
         condition: service_healthy
       prometheus:

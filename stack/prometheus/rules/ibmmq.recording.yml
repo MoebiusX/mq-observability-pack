@@ -57,20 +57,6 @@ groups:
       - record: ibmmq:log_write_latency:seconds
         expr: max by (qmgr) (last_over_time(ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"}[30s]))
 
-  - name: ibmmq.errorbudget
-    interval: 30s
-    rules:
-      # SLO qmgr_process_up_99_9 (objective 0.999) — burn = error_ratio / (1 - objective)
-      - record: ibmmq:errorbudget:burn_5m
-        labels: { slo: qmgr_process_up_99_9 }
-        expr: ibmmq:qmgr_process_up:error_ratio_5m / (1 - 0.999)
-      - record: ibmmq:errorbudget:burn_1h
-        labels: { slo: qmgr_process_up_99_9 }
-        expr: (1 - (sum(avg_over_time(up{job="ibmmq-native"}[1h])) / count(up{job="ibmmq-native"}))) / (1 - 0.999)
-      # SLO canary_success_99_9
-      - record: ibmmq:errorbudget:burn_5m
-        labels: { slo: canary_success_99_9 }
-        expr: ibmmq:canary_success:error_ratio_5m / (1 - 0.999)
-      - record: ibmmq:errorbudget:burn_1h
-        labels: { slo: canary_success_99_9 }
-        expr: (1 - ((sum(rate(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)) / sum(rate(mq_canary_attempts_total[1h])))) / (1 - 0.999)
+  # Error-budget recording rules (ibmmq:errorbudget:burn_5m / burn_1h per SLO and
+  # ibmmq:<sli>:error_ratio_5m for threshold SLIs) are GENERATED into ibmmq.burn.yml by
+  # tools/gen-burn-rules.mjs from spec.policy, together with the burn-rate alerts.
