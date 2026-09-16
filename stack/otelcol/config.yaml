@@ -43,16 +43,27 @@ receivers:
 
   filelog:
     include: [ /var/lib/docker/containers/*/*-json.log ]
-    start_at: end
+    # beginning, not end: the collector deliberately starts after the queue manager is healthy,
+    # so with start_at=end every container's startup lines (strmqm, the MQSC autoconfig verdict,
+    # the apps' first "connected") were never ingested on a fresh stack. file_storage remembers
+    # offsets, so a collector restart does not re-read anything.
+    start_at: beginning
     storage: file_storage
     include_file_path: true
     operators:
-      # docker json-file driver envelope
+      # docker json-file driver envelope. With the compose logging options every line carries
+      # attrs.{com.docker.compose.project, com.docker.compose.service}.
       - type: json_parser
         id: docker_envelope
         timestamp:
           parse_from: attributes.time
           layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      # The include glob is host-wide (/var/lib/docker/containers is every container on the
+      # daemon). Keep this project's lines only: anything else on the host stays out of the lab's
+      # Loki, and lines without the labels (containers created before the logging options) too.
+      - type: filter
+        id: only_this_project
+        expr: 'attributes.attrs == nil || attributes.attrs["com.docker.compose.project"] != "mq-obs"'
       - type: regex_parser
         id: container_id
         parse_from: attributes["log.file.path"]
@@ -63,10 +74,11 @@ receivers:
       - type: remove
         field: attributes.time
       # IBM MQ console JSON (MQ_LOGGING_CONSOLE_FORMAT=json): AMQ log records and web-server
-      # records carry ibm_messageId; the container runtime's own lines carry type=mq_containerlog.
+      # records carry ibm_messageId, the auth-service and mqweb records ibm_datetime, the
+      # container runtime's own lines type=mq_containerlog.
       - type: json_parser
         id: mq_json
-        if: 'body matches "^\\{.*(\"ibm_messageId\"|\"type\":\"mq_containerlog\")"'
+        if: 'body matches "^\\{.*(\"ibm_messageId\"|\"ibm_datetime\"|\"type\":\"mq_containerlog\")"'
         parse_from: body
         parse_to: attributes.mq
         severity:
@@ -97,11 +109,43 @@ receivers:
         if: 'attributes.mq != nil'
         field: resource["service.name"]
         value: ibmmq
+      # Lines that are neither MQ JSON nor app JSON (the ibmmq module's own "[ibmmq] (E) …"
+      # stderr lines during incidents, MQ auth-service lines, Grafana/Loki/Prometheus output)
+      # are named after the container that wrote them, never lumped under a synthetic "docker".
+      - type: add
+        id: service_from_compose_mq
+        if: 'resource["service.name"] == nil and attributes.attrs["com.docker.compose.service"] == "mq"'
+        field: resource["service.name"]
+        value: ibmmq
+      - type: add
+        id: service_from_compose_canary
+        if: 'resource["service.name"] == nil and attributes.attrs["com.docker.compose.service"] == "canary"'
+        field: resource["service.name"]
+        value: mq-canary
+      - type: add
+        id: service_from_compose_producer
+        if: 'resource["service.name"] == nil and attributes.attrs["com.docker.compose.service"] == "producer"'
+        field: resource["service.name"]
+        value: orders-producer
+      - type: add
+        id: service_from_compose_consumer
+        if: 'resource["service.name"] == nil and attributes.attrs["com.docker.compose.service"] == "consumer"'
+        field: resource["service.name"]
+        value: orders-consumer
+      - type: move
+        id: service_from_compose
+        if: 'resource["service.name"] == nil and attributes.attrs["com.docker.compose.service"] != nil'
+        from: attributes.attrs["com.docker.compose.service"]
+        to: resource["service.name"]
       - type: add
         id: default_service
         if: 'resource["service.name"] == nil'
         field: resource["service.name"]
         value: docker
+      - type: remove
+        id: drop_envelope_attrs
+        if: 'attributes.attrs != nil'
+        field: attributes.attrs
       - type: add
         id: service_namespace
         field: resource["service.namespace"]

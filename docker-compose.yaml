@@ -18,10 +18,24 @@ name: mq-obs
 
 x-loki-otlp: &loki_otlp http://loki:3100/otlp
 
+# Every service: come back after a daemon restart or a crash (chaos uses explicit
+# 'compose stop', which unless-stopped honours), json-file logging with the compose labels
+# in each line's envelope (the collector keeps only project=mq-obs lines and names the
+# service from the label), and rotation so a chatty container cannot fill the disk.
+x-service: &lab_service
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      labels: "com.docker.compose.project,com.docker.compose.service"
+      max-size: "20m"
+      max-file: "3"
+
 services:
 
   # ---------------------------------------------------------------- IBM MQ
   mq:
+    <<: *lab_service
     image: icr.io/ibm-messaging/mq:${MQ_IMAGE_TAG:-10.0.0.5-r1}
     hostname: mq
     environment:
@@ -60,6 +74,7 @@ services:
   # Connects as an MQ client over DEV.ADMIN.SVRCONN so it sees exactly what
   # an application sees: if the listener is down, so is this exporter.
   mq-exporter:
+    <<: *lab_service
     build:
       context: ./stack/mq-exporter
       args:
@@ -80,10 +95,10 @@ services:
     depends_on:
       mq:
         condition: service_healthy
-    restart: unless-stopped
 
   # -------------------------------------------------------- OTel Collector
   otel-collector:
+    <<: *lab_service
     image: otel/opentelemetry-collector-contrib:${OTELCOL_TAG:-0.161.0}
     command: ["--config=/etc/otelcol/config.yaml"]
     user: "0"                     # needs to read docker json logs
@@ -119,6 +134,7 @@ services:
 
   # ------------------------------------------------------------ Prometheus
   prometheus:
+    <<: *lab_service
     image: prom/prometheus:${PROM_TAG:-v3.14.0}
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -139,6 +155,7 @@ services:
       retries: 30
 
   alertmanager:
+    <<: *lab_service
     image: prom/alertmanager:${AM_TAG:-v0.34.0}
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -156,6 +173,7 @@ services:
   # Receives Alertmanager webhooks and keeps a timestamped ledger the harness
   # reads back to compute MTTD (alert fired − fault injected).
   alert-sink:
+    <<: *lab_service
     build: ./harness/alert-sink
     image: mq-obs/alert-sink:local
     ports:
@@ -168,6 +186,7 @@ services:
 
   # ------------------------------------------------------------------ Loki
   loki:
+    <<: *lab_service
     image: grafana/loki:${LOKI_TAG:-3.7.7}
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
@@ -184,6 +203,7 @@ services:
   # Jaeger 2.21 was tried first: that release removed the v1 HTTP query API and Grafana
   # 12.4's Jaeger datasource speaks only v1, so Explore and log→trace links were dead.
   tempo:
+    <<: *lab_service
     image: grafana/tempo:${TEMPO_TAG:-2.10.1}
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     volumes:
@@ -195,6 +215,7 @@ services:
 
   # --------------------------------------------------------------- Grafana
   grafana:
+    <<: *lab_service
     image: grafana/grafana:${GRAFANA_TAG:-12.4.11}
     environment:
       GF_SECURITY_ADMIN_USER: admin
@@ -222,6 +243,8 @@ services:
   # ---------------------------------------------------------------- Canary
   # Node + ibmmq (MQI) + OTel SDK. Same image, three roles.
   canary:
+    <<: *lab_service
+    mem_limit: 512m               # a leak recycles the container (restart policy), never the host
     build: ./canary
     image: mq-obs/canary:local
     environment: &canary_env
@@ -242,9 +265,10 @@ services:
     depends_on:
       mq:
         condition: service_healthy
-    restart: unless-stopped
 
   producer:
+    <<: *lab_service
+    mem_limit: 512m
     image: mq-obs/canary:local
     pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
@@ -257,21 +281,24 @@ services:
     depends_on:
       canary:
         condition: service_started
-    restart: unless-stopped
 
   consumer:
+    <<: *lab_service
+    mem_limit: 512m
     image: mq-obs/canary:local
     pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
       <<: *canary_env
       MODE: consumer
       OTEL_SERVICE_NAME: orders-consumer
+      # Reconnect every N messages (~3.5 min at 5 msg/s): the consumer's native heap grew
+      # ~1 KB per GET (measured 2026-09-16), and a bounded connection lifetime caps it.
+      CONSUMER_RECYCLE_EVERY: "1000"
     secrets:
       - mqAppPassword
     depends_on:
       canary:
         condition: service_started
-    restart: unless-stopped
 
 secrets:
   mqAdminPassword:
