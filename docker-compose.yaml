@@ -47,7 +47,7 @@ services:
     ulimits:
       nofile: { soft: 10240, hard: 10240 }
     healthcheck:
-      test: ["CMD", "chkmqhealthy"]
+      test: ["CMD", "chkmqready"]   # readiness (qmgr RUNNING + listener up), not just liveness (chkmqhealthy)
       interval: 5s
       timeout: 5s
       retries: 60
@@ -100,9 +100,17 @@ services:
       - "127.0.0.1:28888:8888"   # collector self-metrics
       - "127.0.0.1:23133:13133"  # health_check
     depends_on:
-      - prometheus
-      - loki
-      - tempo
+      # Scrape mq:9157 only once the queue manager is ready: otherwise a fresh start records
+      # a minute of up{job="ibmmq-native"}=0 that burns the 1h error budget and fires
+      # IBMMQAvailabilityBurnFast on a healthy stack.
+      mq:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
     healthcheck:
       test: ["CMD", "/otelcol-contrib", "--version"]   # scratch-ish image; liveness only
       interval: 10s
