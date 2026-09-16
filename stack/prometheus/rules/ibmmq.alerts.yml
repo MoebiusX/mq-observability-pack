@@ -72,15 +72,20 @@ groups:
           runbook: runbooks/dlq.md
 
       # ---- synthetic canary -----------------------------------------------------
+      # `or vector(0)`: during a 100 % failure there is no result="ok" series and the bare
+      # ratio is empty, so this alert stayed silent while every canary attempt failed (seen live).
+      # Detection budget: the ratio over 1m drops below 0.5 after ~4 failed 10 s probes, plus
+      # `for` 20 s, rule eval and group_wait ≈ 60-75 s. Measured 105 s with the earlier 2m/30s
+      # settings. Chaos experiments that expect this alert budget 90 s (pack expected_mttd).
       - alert: MQCanaryFailing
         expr: |
-          (sum(rate(mq_canary_attempts_total{result="ok"}[2m])) / sum(rate(mq_canary_attempts_total[2m])) < 0.5)
+          ((sum(rate(mq_canary_attempts_total{result="ok"}[1m])) or vector(0)) / sum(rate(mq_canary_attempts_total[1m])) < 0.5)
             or absent(mq_canary_attempts_total)
-        for: 30s
+        for: 20s
         labels: { severity: SEV1, pack: ibmmq, sli: canary_success }
         annotations:
           summary: "Synthetic put/get canary is failing"
-          description: "Less than half of the canary round-trips succeeded over the last 2 minutes (or the canary is silent)."
+          description: "Less than half of the canary round-trips succeeded over the last minute (or the canary is silent)."
           runbook: runbooks/canary.md
 
       - alert: MQCanaryLatencyHigh
@@ -99,7 +104,7 @@ groups:
           summary: "Recovery-log write latency {{ $value }}s on {{ $labels.qmgr }} — persistent-message throughput at risk"
 
       - alert: IBMMQFileSystemLow
-        expr: min by (qmgr) (ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"}) < 15
+        expr: min by (qmgr) (last_over_time(ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"}[30s])) < 15
         for: 1m
         labels: { severity: SEV2, pack: ibmmq, sli: qmgr_process_up }
         annotations:

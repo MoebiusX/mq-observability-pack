@@ -21,24 +21,30 @@ groups:
         expr: 1 - ibmmq:qmgr_reachability:ratio_5m
 
       # --- queue health ---
+      # last_over_time(...[30s]): mq_prometheus only exposes publication-derived gauges on
+      # scrapes where a $SYS publication arrived (10 s publish vs 10 s scrape → ~1 in 12
+      # scrapes has none, measured live). The window bridges that gap instead of letting a
+      # staleness marker empty the SLI. Same expressions as packs/ibmmq.pack.yaml spec.slis.
       - record: ibmmq:queue_depth_headroom:ratio
         expr: |
           max by (qmgr, queue) (
-            ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}
+            last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
               / ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}
           )
       - record: ibmmq:oldest_message_age:seconds_max
         expr: |
           max by (qmgr, queue) (
-            ibmmq_queue_oldest_message_age{job="ibmmq-exporter", queue=~"APP.*", queue!="APP.DLQ"}
+            last_over_time(ibmmq_queue_oldest_message_age{job="ibmmq-exporter", queue=~"APP.*", queue!="APP.DLQ"}[30s])
           )
       - record: ibmmq:dlq_depth:max
-        expr: max by (qmgr) (ibmmq_queue_depth{job="ibmmq-exporter", queue="APP.DLQ"})
+        expr: max by (qmgr) (last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue="APP.DLQ"}[30s]))
 
       # --- synthetic canary (OTel SDK → collector → remote-write) ---
+      # `or vector(0)`: with 100 % failures there is no result="ok" series, so a bare sum()
+      # is empty rather than 0 and every consumer of this ratio goes blind (seen live).
       - record: ibmmq:canary_success:ratio_5m
         expr: |
-          sum(rate(mq_canary_attempts_total{result="ok"}[5m]))
+          (sum(rate(mq_canary_attempts_total{result="ok"}[5m])) or vector(0))
             / sum(rate(mq_canary_attempts_total[5m]))
       - record: ibmmq:canary_success:error_ratio_5m
         expr: 1 - ibmmq:canary_success:ratio_5m
@@ -49,7 +55,7 @@ groups:
 
       # --- queue manager internals ---
       - record: ibmmq:log_write_latency:seconds
-        expr: max by (qmgr) (ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"})
+        expr: max by (qmgr) (last_over_time(ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"}[30s]))
 
   - name: ibmmq.errorbudget
     interval: 30s
@@ -67,4 +73,4 @@ groups:
         expr: ibmmq:canary_success:error_ratio_5m / (1 - 0.999)
       - record: ibmmq:errorbudget:burn_1h
         labels: { slo: canary_success_99_9 }
-        expr: (1 - (sum(rate(mq_canary_attempts_total{result="ok"}[1h])) / sum(rate(mq_canary_attempts_total[1h])))) / (1 - 0.999)
+        expr: (1 - ((sum(rate(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)) / sum(rate(mq_canary_attempts_total[1h])))) / (1 - 0.999)
