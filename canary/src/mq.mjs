@@ -38,19 +38,29 @@ export const OPEN_PUT = MQC.MQOO_OUTPUT | MQC.MQOO_FAIL_IF_QUIESCING;
 export const OPEN_GET = MQC.MQOO_INPUT_AS_Q_DEF | MQC.MQOO_FAIL_IF_QUIESCING;
 export const OPEN_BOTH = OPEN_PUT | OPEN_GET;
 
-/** Put a message; returns the MQMD (MsgId filled in). */
-export async function put(hObj, payload, { persistent = false } = {}) {
+/**
+ * Put a message; returns the MQMD (MsgId filled in).
+ * `expiryTenths` (tenths of a second) bounds how long an unconsumed message survives: the
+ * canary sets it, because a probe whose GET timed out would otherwise leave its message on
+ * APP.CANARY forever (MAXDEPTH 1000 → every later probe fails once the queue is full).
+ */
+export async function put(hObj, payload, { persistent = false, expiryTenths = MQC.MQEI_UNLIMITED } = {}) {
   const md = new mq.MQMD();
   md.Format = MQC.MQFMT_STRING;
   md.Persistence = persistent ? MQC.MQPER_PERSISTENT : MQC.MQPER_NOT_PERSISTENT;
+  md.Expiry = expiryTenths;
   const pmo = new mq.MQPMO();
   pmo.Options = MQC.MQPMO_NO_SYNCPOINT | MQC.MQPMO_NEW_MSG_ID | MQC.MQPMO_NEW_CORREL_ID | MQC.MQPMO_FAIL_IF_QUIESCING;
   await mq.PutPromise(hObj, md, pmo, payload);
   return md;
 }
 
-/** Synchronous GET with wait; resolves {md, data} or null on MQRC_NO_MSG_AVAILABLE. */
-export function get(hObj, { waitMs = 5000, matchMsgId = null, bufSize = 65536 } = {}) {
+/**
+ * Synchronous GET with wait; resolves {md, data} or null on MQRC_NO_MSG_AVAILABLE.
+ * `acceptTruncated` removes a message larger than the buffer instead of failing with
+ * MQRC_TRUNCATED_MSG_FAILED (2080) and leaving it at the head of the queue forever.
+ */
+export function get(hObj, { waitMs = 5000, matchMsgId = null, bufSize = 65536, acceptTruncated = false } = {}) {
   return new Promise((resolve, reject) => {
     const md = new mq.MQMD();
     const gmo = new mq.MQGMO();
@@ -61,6 +71,7 @@ export function get(hObj, { waitMs = 5000, matchMsgId = null, bufSize = 65536 } 
     // NO_PROPERTIES the library swaps in its own handle (lib/mqiotel.js getTraceBefore), reads
     // the context for the consumer span link, and the application sees the clean body.
     gmo.Options = MQC.MQGMO_NO_SYNCPOINT | MQC.MQGMO_WAIT | MQC.MQGMO_CONVERT | MQC.MQGMO_FAIL_IF_QUIESCING | MQC.MQGMO_NO_PROPERTIES;
+    if (acceptTruncated) gmo.Options |= MQC.MQGMO_ACCEPT_TRUNCATED_MSG;
     gmo.WaitInterval = waitMs;
     if (matchMsgId) {
       gmo.MatchOptions = MQC.MQMO_MATCH_MSG_ID;
@@ -90,10 +101,11 @@ export function classify(err) {
   switch (rc) {
     case MQC.MQRC_Q_FULL: return 'put_failed_q_full';
     case MQC.MQRC_NO_MSG_AVAILABLE: return 'get_timeout';
+    case MQC.MQRC_TRUNCATED_MSG_FAILED: return 'message_too_large';
+    case MQC.MQRC_NOT_AUTHORIZED: return 'auth_failed';           // a rotated password is not a listener fault
     case MQC.MQRC_Q_MGR_NOT_AVAILABLE:
     case MQC.MQRC_HOST_NOT_AVAILABLE:
     case MQC.MQRC_CHANNEL_NOT_AVAILABLE:
-    case MQC.MQRC_NOT_AUTHORIZED:
     case MQC.MQRC_CONNECTION_BROKEN:
     case MQC.MQRC_CONNECTION_QUIESCING:
     case MQC.MQRC_Q_MGR_QUIESCING:
@@ -109,5 +121,5 @@ export function classify(err) {
 /** True when the connection itself is gone and must be re-established. */
 export function needsReconnect(err) {
   const r = classify(err);
-  return r === 'connect_failed' || r === 'handle_invalid';
+  return r === 'connect_failed' || r === 'handle_invalid' || r === 'auth_failed';
 }
