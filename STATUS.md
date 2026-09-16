@@ -3,9 +3,10 @@
 ## 2026-09-16 (afternoon) — first live run on Nitro5, stack fixed until it certifies
 
 **State:** the lab runs end to end against a real MQ 10.0.0.5 queue manager on
-Docker Desktop for Windows. Conformance C1-C10 and synthetic S1-S5 pass (15/15,
-run 4 at 15:29Z). Chaos: see "Certification runs" below. `reports/cert-report.*`
-holds the latest full run (git-ignored, regenerate with `npm run certify`).
+Docker Desktop for Windows and **certifies PASS**: full run 16:13-16:24Z (11 min),
+10/10 conformance, 5/5 synthetic, 5/5 chaos experiments, 8/8 expected alerts fired
+within budget and resolved after recovery, MTTD p50 59.6 s / p95 118.7 s.
+`reports/cert-report.*` holds that run (git-ignored, regenerate with `npm run certify`).
 
 **Branch/PR:** `develop` → PR #1 to `main` (https://github.com/MoebiusX/mq-observability-pack/pull/1).
 Commits are single-concern; read them in order, each message says what broke live.
@@ -53,13 +54,15 @@ Commits are single-concern; read them in order, each message says what broke liv
 | 15:29Z run4 | conformance+synthetic | **PASS 15/15** | first clean pass |
 | 15:31-15:49Z | full, 5 chaos | FAIL | qmgr-down WARN (canary 105 s), listener-stopped FAIL (no channel stop); queue-full 44/34 s, consumer-stall 99.6 s, dlq-poison 47.3 s all PASS; MTTD p50 47 s |
 | 15:57-16:20Z | full, 5 chaos | WARN | all 8 alerts fired and resolved; listener-stopped now detected (`Unreachable` 57.5 s); only the canary alert late (109/108 s, old ratio rule) |
+| 16:13-16:24Z | full, 5 chaos | **PASS** | flat-counter canary rule: `MQCanaryFailing` 60.1 / 59.6 s; `Down` 40.1 s, `Unreachable` 59.6 s, `DepthHigh` 49.1 s, `Full` 39.1 s, `AgeHigh` 118.7 s, `DLQ` 48.4 s; resolutions 19.5-38.6 s |
 
-### Measured lab timings (full runs 1-2)
-`IBMMQQueueManagerDown` 39-45 s, `IBMMQQueueManagerUnreachable` 57.5 s, `IBMMQQueueFull`
-34-38 s, `IBMMQQueueDepthHigh` 44-48 s, `IBMMQDeadLetterQueueNotEmpty` 47-58 s,
-`IBMMQOldestMessageAgeHigh` 100-118 s (needs 60 s of age first; budget raised to 150 s),
-`MQCanaryFailing` 105-109 s with the ratio rule (replaced by the flat-counter rule,
-budget 90 s). Resolution after recovery: 20-88 s. Ingest lag of canary samples 3-5 s.
+### Measured lab timings (full runs 1-3)
+`IBMMQQueueManagerDown` 39-45 s, `IBMMQQueueManagerUnreachable` 57-60 s, `IBMMQQueueFull`
+34-39 s, `IBMMQQueueDepthHigh` 44-49 s, `IBMMQDeadLetterQueueNotEmpty` 47-58 s,
+`IBMMQOldestMessageAgeHigh` 100-119 s (needs 60 s of age first; budget 150 s),
+`MQCanaryFailing` 60 s with the flat-counter rule (105-109 s with the earlier ratio rule).
+Resolution after recovery: 20-40 s (canary 30 s; 80-88 s with the old rule). Ingest lag of
+canary samples 3-5 s. A full `npm run certify` takes ~11 min.
 
 ## Next (in order)
 1. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
