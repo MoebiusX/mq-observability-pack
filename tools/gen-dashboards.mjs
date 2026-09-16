@@ -2,7 +2,9 @@
 // Generates stack/grafana/dashboards/*.json from a compact panel spec so the
 // dashboards stay reviewable in a diff. Panel ids match packs/ibmmq.pack.yaml
 // panel_bindings (stored in the panel description as "binds_to: ...").
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { parse as parseYaml } from '../vendor/observogram/lib/mini-yaml.mjs';
+const pack = parseYaml(readFileSync('packs/ibmmq.pack.yaml', 'utf8'));
 const DS = { type: 'prometheus', uid: 'prom' };
 let nextId = 1;
 const base = (p, extra) => ({ id: nextId++, datasource: DS, ...extra, ...p });
@@ -80,6 +82,19 @@ function dashboard(uid, title, panels, tags, { templating = { list: [] }, time =
 
 const green = (bad, warn) => [{ color: 'green', value: null }, { color: 'orange', value: warn }, { color: 'red', value: bad }];
 const redBelow = (warn, bad) => [{ color: 'red', value: null }, { color: 'orange', value: bad }, { color: 'green', value: warn }];
+// Burn-rate stat colours come from the SLO's own policy windows (orange at the smallest
+// factor that alerts, red at the largest), not from one 6×/14× guess: message_age and
+// dlq_empty page at 4×/10× and log_latency at 3×/8×, so a fixed 6× stayed green while the
+// SLO's own alert was firing.
+function burnThresholds(sloId) {
+  const factors = (pack.spec.policy?.burn_rate_alerts || []).filter(b => b.slo === sloId).flatMap(b => (b.windows || []).map(w => Number(w.factor))).filter(Number.isFinite);
+  return factors.length ? green(Math.max(...factors), Math.min(...factors)) : green(14, 6);
+}
+// mq_prometheus reports channel MSGS / BYTSSENT / BYTSRCVD as per-interval deltas (raw samples
+// 99, 50, 99, 50 … for a steady 10 msg/s channel), not as cumulative counters: rate() treated
+// every drop as a counter reset and showed about half the real throughput (measured against
+// the apps' own counters). Same estimator as the queue MQI counts: sum over 2 m ÷ 120 s.
+const perSec = (metric, by, sel) => `sum by (${by})(sum_over_time(${metric}{${sel}}[2m])) / 120`;
 
 // ---------------------------------------------------------------- overview
 nextId = 1;
@@ -92,8 +107,8 @@ const overview = dashboard('ibmmq-overview', 'IBM MQ — Overview (pack SLIs)', 
   stat('Canary success (5m)', 'ibmmq:canary_success:ratio_5m', { binds: 'slis.canary_success', unit: 'percentunit', thresholds: redBelow(0.999, 0.99), x: 20, y: 0, decimals: 2 }),
   stat('Canary p99 RTT', 'ibmmq:canary_roundtrip:p99_5m', { binds: 'slis.canary_roundtrip_p99', unit: 's', thresholds: green(1, 0.5), x: 0, y: 4, decimals: 3 }),
   stat('Log write latency', 'ibmmq:log_write_latency:seconds', { binds: 'slis.log_write_latency', unit: 's', thresholds: green(0.05, 0.02), x: 4, y: 4, decimals: 4 }),
-  stat('SLO burn 1h · process up', 'ibmmq:errorbudget:burn_1h{slo="qmgr_process_up_99_9"}', { binds: 'slos.qmgr_process_up_99_9', thresholds: green(14, 6), x: 8, y: 4, decimals: 1 }),
-  stat('SLO burn 1h · canary', 'ibmmq:errorbudget:burn_1h{slo="canary_success_99_9"}', { binds: 'slos.canary_success_99_9', thresholds: green(14, 6), x: 12, y: 4, decimals: 1 }),
+  stat('SLO burn 1h · process up', 'ibmmq:errorbudget:burn_1h{slo="qmgr_process_up_99_9"}', { binds: 'slos.qmgr_process_up_99_9', thresholds: burnThresholds('qmgr_process_up_99_9'), x: 8, y: 4, decimals: 1 }),
+  stat('SLO burn 1h · canary', 'ibmmq:errorbudget:burn_1h{slo="canary_success_99_9"}', { binds: 'slos.canary_success_99_9', thresholds: burnThresholds('canary_success_99_9'), x: 12, y: 4, decimals: 1 }),
   stat('Connections', 'max(ibmmq_qmgr_connection_count{job="ibmmq-exporter"})', { x: 16, y: 4 }),
   stat('Firing pack alerts', 'count(ALERTS{alertstate="firing", pack="ibmmq"}) or vector(0)', { thresholds: green(1, 1), x: 20, y: 4 }),
 
@@ -119,7 +134,9 @@ const overview = dashboard('ibmmq-overview', 'IBM MQ — Overview (pack SLIs)', 
     { expr: 'max by (qmgr)(ibmmq_qmgr_system_cpu_time_percentage{job="ibmmq-exporter"})', legend: 'system cpu %' },
     { expr: 'min by (qmgr)(ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"})', legend: 'fs free %' },
   ], { unit: 'percent', x: 12, y: 32 }),
-  logs('Queue manager log (Loki, parsed MQ JSON)', '{service_name="ibmmq"} | json | line_format "{{.mq_message_id}} {{.body}}"', { x: 0, y: 40 }),
+  // The stored line is already the human-readable MQ message (the collector parsed the JSON
+  // and kept the id as structured metadata), so no `| json` here: it errored on 96 % of lines.
+  logs('Queue manager log (Loki; MQ message id + text)', '{service_name="ibmmq"} | line_format "{{.mq_message_id}} {{__line__}}"', { x: 0, y: 40 }),
 ], ['ibmmq', 'pack', 'slo']);
 
 // ------------------------------------------------------------------ queues
@@ -141,10 +158,9 @@ const queues = dashboard('ibmmq-queues', 'IBM MQ — Queues & Channels', [
     { expr: 'ibmmq_queue_input_handles{job="ibmmq-exporter"}', legend: '{{queue}} in' },
     { expr: 'ibmmq_queue_output_handles{job="ibmmq-exporter"}', legend: '{{queue}} out' },
   ], { x: 0, y: 24 }),
-  ts('Channel status (0 stopped · 1 transition · 2 running)', [{ expr: 'ibmmq_channel_status_squash{job="ibmmq-exporter"}', legend: '{{channel}} ({{type}})' }], { binds: 'ref:queries.per_channel_status', min: 0, max: 2, x: 12, y: 24 }),
-  ts('Channel messages / bytes', [
-    // DIS CHSTATUS MSGS is cumulative per channel instance, so rate() is right here.
-    { expr: 'sum by (channel)(rate(ibmmq_channel_messages{job="ibmmq-exporter"}[2m]))', legend: '{{channel}} msgs/s' },
+  ts('Channel status (0 stopped · 1 transition · 2 running)', [{ expr: 'max by (channel, type)(ibmmq_channel_status_squash{job="ibmmq-exporter"})', legend: '{{channel}} ({{type}})' }], { binds: 'ref:queries.per_channel_status', min: 0, max: 2, x: 12, y: 24 }),
+  ts('Channel messages / s (per-interval deltas ÷ 120 s)', [
+    { expr: perSec('ibmmq_channel_messages', 'channel', 'job="ibmmq-exporter"'), legend: '{{channel}} msgs/s' },
   ], { unit: 'ops', x: 0, y: 32 }),
   // Native endpoint names verified live against MQ 10.0.0.5: counters carry a _total suffix
   // and gets are reported as destructive_get (docs/catalogue-evidence/ibmmq.md §4b).
@@ -163,12 +179,13 @@ const SLOS = [
   ['qmgr_process_up_99_9', 'QMgr process up 99.9%'], ['qmgr_reachability_99_9', 'QMgr reachable 99.9%'],
   ['queue_headroom_99_9', 'Queue headroom 99.9%'], ['message_age_99_under_60s', 'Message age <60s 99%'],
   ['dlq_empty_99_9', 'DLQ empty 99.9%'], ['canary_success_99_9', 'Canary success 99.9%'],
-  ['log_latency_99_under_20ms', 'Log latency <20ms 99%'],
+  ['log_latency_99_under_20ms', 'Log latency <20ms 99%'], ['canary_latency_99_p99_500ms', 'Canary p99 <500ms 99%'],
 ];
+if (SLOS.length !== (pack.spec.slos || []).length) throw new Error(`SLO burn dashboard lists ${SLOS.length} SLOs, the pack has ${pack.spec.slos.length}`);
 const sloBurn = dashboard('ibmmq-slo-burn', 'IBM MQ — SLO burn rates', [
   ...SLOS.map(([id, title], i) => stat(`${title} · burn 1h`, `ibmmq:errorbudget:burn_1h{slo="${id}"}`,
-    { binds: `slos.${id}`, thresholds: green(14, 6), x: (i % 6) * 4, y: Math.floor(i / 6) * 4, decimals: 1 })),
-  stat('Burn-rate alerts firing', 'count(ALERTS{alertstate="firing", pack="ibmmq", burn_rate!=""}) or vector(0)', { thresholds: green(1, 1), x: 4, y: 4 }),
+    { binds: `slos.${id}`, thresholds: burnThresholds(id), x: (i % 6) * 4, y: Math.floor(i / 6) * 4, decimals: 1 })),
+  stat('Burn-rate alerts firing', 'count(ALERTS{alertstate="firing", pack="ibmmq", burn_rate!=""}) or vector(0)', { thresholds: green(1, 1), x: 8, y: 4 }),
   ts('Burn rate · fast window (5m)', [{ expr: 'ibmmq:errorbudget:burn_5m', legend: '{{slo}}' }], { x: 0, y: 8 }),
   ts('Burn rate · slow window (1h)', [{ expr: 'ibmmq:errorbudget:burn_1h', legend: '{{slo}}' }], { x: 12, y: 8 }),
   ts('Error ratio · 5m, per SLI', [{ expr: '{__name__=~"ibmmq:.*:error_ratio_5m"}', legend: '{{__name__}}' }], { unit: 'percentunit', x: 0, y: 16 }),
@@ -202,7 +219,7 @@ const items = [
   ...[
     ['qmgr_process_up_99_9', 'process up'], ['qmgr_reachability_99_9', 'reachable'], ['queue_headroom_99_9', 'headroom'], ['message_age_99_under_60s', 'message age'],
     ['dlq_empty_99_9', 'DLQ empty'], ['canary_success_99_9', 'canary success'], ['canary_latency_99_p99_500ms', 'canary p99'], ['log_latency_99_under_20ms', 'log latency'],
-  ].map(([id, t]) => stat(`Burn 1h · ${t}`, `ibmmq:errorbudget:burn_1h{slo="${id}"}`, { binds: `slos.${id}`, thresholds: green(14, 6), decimals: 1, w: 3, h: 3 })),
+  ].map(([id, t]) => stat(`Burn 1h · ${t}`, `ibmmq:errorbudget:burn_1h{slo="${id}"}`, { binds: `slos.${id}`, thresholds: burnThresholds(id), decimals: 1, w: 3, h: 3 })),
   ts('Burn rate · fast window (5m)', [{ expr: 'ibmmq:errorbudget:burn_5m', legend: '{{slo}}' }], { w: 12, h: 6 }),
   ts('Burn rate · slow window (1h)', [{ expr: 'ibmmq:errorbudget:burn_1h', legend: '{{slo}}' }], { w: 12, h: 6 }),
 
@@ -259,10 +276,10 @@ const items = [
   row('🔌 Channels & connections'),
   ts('Channel status (0 stopped · 1 transition · 2 running)', [{ expr: `max by (channel, type)(ibmmq_channel_status_squash{${EXP}})`, legend: '{{channel}} ({{type}})' }], { min: 0, max: 2, w: 12, h: 6 }),
   ts('Channel instances', [{ expr: `max by (channel)(ibmmq_channel_cur_inst{${EXP}})`, legend: '{{channel}}' }], { w: 12, h: 6 }),
-  ts('Channel messages / s', [{ expr: `sum by (channel)(rate(ibmmq_channel_messages{${EXP}}[2m]))`, legend: '{{channel}}' }], { unit: 'ops', w: 12, h: 6 }),
-  ts('Channel bytes / s (sent + received)', [
-    { expr: `sum by (channel)(rate(ibmmq_channel_bytes_sent{${EXP}}[2m]))`, legend: '{{channel}} sent' },
-    { expr: `sum by (channel)(rate(ibmmq_channel_bytes_rcvd{${EXP}}[2m]))`, legend: '{{channel}} rcvd' },
+  ts('Channel messages / s (per-interval deltas ÷ 120 s)', [{ expr: perSec('ibmmq_channel_messages', 'channel', EXP), legend: '{{channel}}' }], { unit: 'ops', w: 12, h: 6 }),
+  ts('Channel bytes / s (sent + received; per-interval deltas ÷ 120 s)', [
+    { expr: perSec('ibmmq_channel_bytes_sent', 'channel', EXP), legend: '{{channel}} sent' },
+    { expr: perSec('ibmmq_channel_bytes_rcvd', 'channel', EXP), legend: '{{channel}} rcvd' },
   ], { unit: 'Bps', w: 12, h: 6 }),
 
   // ---- Canary & orders flow
@@ -365,10 +382,13 @@ const unified = dashboard('ibmmq-unified', 'IBM MQ — Unified Observability', f
     { name: 'queue', label: 'Queue', type: 'query', datasource: DS, refresh: 2, sort: 1, multi: true, includeAll: true, allValue: '.*',
       query: { query: 'label_values(ibmmq_queue_depth{job="ibmmq-exporter"}, queue)', refId: 'StandardVariableQuery' },
       definition: 'label_values(ibmmq_queue_depth{job="ibmmq-exporter"}, queue)', current: { text: 'All', value: '$__all', selected: true }, options: [] },
-    { name: 'service', label: 'Log service', type: 'custom', multi: true, includeAll: true, allValue: '.+',
-      query: 'ibmmq,mq-canary,orders-producer,orders-consumer',
-      options: ['ibmmq', 'mq-canary', 'orders-producer', 'orders-consumer'].map(v => ({ text: v, value: v, selected: false })),
-      current: { text: 'All', value: '$__all', selected: true } },
+    // Options come from Loki (every service the collector names, so the other lab containers
+    // are selectable too); "All" means the four MQ services — the board is about MQ, and the
+    // old ".+" put Grafana's and Loki's own request logs under the MQ logs panel.
+    { name: 'service', label: 'Log service', type: 'query', datasource: { type: 'loki', uid: 'loki' }, refresh: 2, sort: 1, multi: true, includeAll: true,
+      allValue: 'ibmmq|mq-canary|orders-producer|orders-consumer',
+      query: { label: 'service_name', refId: 'LokiVariableQueryEditor-VariableQuery', stream: '', type: 1 },
+      definition: 'label_values(service_name)', current: { text: 'All', value: '$__all', selected: true }, options: [] },
   ] },
 });
 

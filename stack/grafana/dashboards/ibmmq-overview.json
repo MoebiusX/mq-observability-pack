@@ -1143,7 +1143,7 @@
         "uid": "loki"
       },
       "type": "logs",
-      "title": "Queue manager log (Loki, parsed MQ JSON)",
+      "title": "Queue manager log (Loki; MQ message id + text)",
       "gridPos": {
         "x": 0,
         "y": 40,
@@ -1153,7 +1153,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{service_name=\"ibmmq\"} | json | line_format \"{{.mq_message_id}} {{.body}}\""
+          "expr": "{service_name=\"ibmmq\"} | line_format \"{{.mq_message_id}} {{__line__}}\""
         }
       ],
       "options": {

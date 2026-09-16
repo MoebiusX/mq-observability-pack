@@ -539,6 +539,7 @@ spec:
         - { panel: slo-dlq-empty,           binds_to: slos.dlq_empty_99_9 }
         - { panel: slo-canary-success,      binds_to: slos.canary_success_99_9 }
         - { panel: slo-log-latency,         binds_to: slos.log_latency_99_under_20ms }
+        - { panel: slo-canary-latency,      binds_to: slos.canary_latency_99_p99_500ms }
 
   # ---------------------------------------------------------------------------
   # 7. Policy — multi-window burn-rate alerts (Google SRE playbook)

@@ -46,38 +46,29 @@
       {
         "name": "service",
         "label": "Log service",
-        "type": "custom",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "refresh": 2,
+        "sort": 1,
         "multi": true,
         "includeAll": true,
-        "allValue": ".+",
-        "query": "ibmmq,mq-canary,orders-producer,orders-consumer",
-        "options": [
-          {
-            "text": "ibmmq",
-            "value": "ibmmq",
-            "selected": false
-          },
-          {
-            "text": "mq-canary",
-            "value": "mq-canary",
-            "selected": false
-          },
-          {
-            "text": "orders-producer",
-            "value": "orders-producer",
-            "selected": false
-          },
-          {
-            "text": "orders-consumer",
-            "value": "orders-consumer",
-            "selected": false
-          }
-        ],
+        "allValue": "ibmmq|mq-canary|orders-producer|orders-consumer",
+        "query": {
+          "label": "service_name",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "",
+          "type": 1
+        },
+        "definition": "label_values(service_name)",
         "current": {
           "text": "All",
           "value": "$__all",
           "selected": true
-        }
+        },
+        "options": []
       }
     ]
   },
@@ -819,11 +810,11 @@
               },
               {
                 "color": "orange",
-                "value": 6
+                "value": 4
               },
               {
                 "color": "red",
-                "value": 14
+                "value": 10
               }
             ]
           }
@@ -879,11 +870,11 @@
               },
               {
                 "color": "orange",
-                "value": 6
+                "value": 4
               },
               {
                 "color": "red",
-                "value": 14
+                "value": 10
               }
             ]
           }
@@ -1059,11 +1050,11 @@
               },
               {
                 "color": "orange",
-                "value": 6
+                "value": 3
               },
               {
                 "color": "red",
-                "value": 14
+                "value": 8
               }
             ]
           }
@@ -2226,7 +2217,7 @@
         "uid": "prom"
       },
       "type": "timeseries",
-      "title": "Channel messages / s",
+      "title": "Channel messages / s (per-interval deltas ÷ 120 s)",
       "gridPos": {
         "x": 0,
         "y": 52,
@@ -2236,7 +2227,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (channel)(rate(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{channel}}"
         }
       ],
@@ -2269,7 +2260,7 @@
         "uid": "prom"
       },
       "type": "timeseries",
-      "title": "Channel bytes / s (sent + received)",
+      "title": "Channel bytes / s (sent + received; per-interval deltas ÷ 120 s)",
       "gridPos": {
         "x": 12,
         "y": 52,
@@ -2279,12 +2270,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (channel)(rate(ibmmq_channel_bytes_sent{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_bytes_sent{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{channel}} sent"
         },
         {
           "refId": "B",
-          "expr": "sum by (channel)(rate(ibmmq_channel_bytes_rcvd{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_bytes_rcvd{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{channel}} rcvd"
         }
       ],

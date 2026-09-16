@@ -377,7 +377,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "ibmmq_channel_status_squash{job=\"ibmmq-exporter\"}",
+          "expr": "max by (channel, type)(ibmmq_channel_status_squash{job=\"ibmmq-exporter\"})",
           "legendFormat": "{{channel}} ({{type}})"
         }
       ],
@@ -412,7 +412,7 @@
         "uid": "prom"
       },
       "type": "timeseries",
-      "title": "Channel messages / bytes",
+      "title": "Channel messages / s (per-interval deltas ÷ 120 s)",
       "gridPos": {
         "x": 0,
         "y": 32,
@@ -422,7 +422,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (channel)(rate(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{channel}} msgs/s"
         }
       ],
