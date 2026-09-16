@@ -5,6 +5,8 @@ import { createServer } from 'node:http';
 
 const events = [];
 const port = Number(process.env.PORT || 9095);
+const MAX_EVENTS = Number(process.env.MAX_EVENTS || 20000);     // ring buffer: repeat_interval re-sends long burns hourly
+const MAX_BODY = 1024 * 1024;                                    // an Alertmanager webhook is a few KB; refuse anything absurd
 
 const json = (res, code, body) => {
   res.writeHead(code, { 'content-type': 'application/json' });
@@ -22,13 +24,16 @@ createServer((req, res) => {
   }
   if (req.method === 'DELETE' && url.pathname === '/events') { events.length = 0; return json(res, 200, { ok: true }); }
   if (req.method === 'POST' && url.pathname === '/webhook') {
-    let body = '';
-    req.on('data', c => { body += c; });
+    let body = '', size = 0, tooLarge = false;
+    req.on('data', c => { size += c.length; if (size > MAX_BODY) { tooLarge = true; req.destroy(); return; } body += c; });
+    req.on('close', () => { if (tooLarge && !res.headersSent) json(res, 413, { error: 'body too large' }); });
     req.on('end', () => {
+      if (tooLarge) return;
       try {
         const payload = JSON.parse(body || '{}');
         const receivedAt = Date.now();
         for (const a of payload.alerts || []) {
+          if (events.length >= MAX_EVENTS) events.shift();
           events.push({
             receivedAt,
             status: a.status,
