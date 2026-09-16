@@ -129,7 +129,10 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   equal the pack `id`, and each `panel_bindings[].binds_to` must appear as some panel's
   `description: "binds_to: <value>"` (the `binds` option in `gen-dashboards.mjs`).
   A dashboard with `template:` and no `source` is skipped (reported as template-bound
-  by conformance C7).
+  by conformance C7). `ibmmq-unified` is laid out by `flow()` (add panels in reading
+  order, never by coordinates). After changing any dashboard run `npm run
+  verify:dashboards` against the live stack: it executes every Prometheus/Loki/Tempo
+  target of every panel and lists the ones that error or return nothing.
 - Chaos: each `validation.chaos_experiments[].id` needs an entry in the `faults` map in
   `harness/checks/chaos.mjs` (inject + recover), otherwise it is SKIP.
   `fault.duration` is the hold time, `expected_mttd` the target, and

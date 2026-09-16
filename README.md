@@ -30,7 +30,7 @@ build context on Windows.
 |---|---|---|
 | L1 Contract — 8 SLIs, 8 SLOs | PromQL over `ibmmq_*` (mq_prometheus), `up{job="ibmmq-native"}`, `mq_canary_*` | `packs/ibmmq.pack.yaml` |
 | L2 Telemetry | OTel Collector 0.161 (prometheus + filelog + OTLP receivers → remote-write, Loki OTLP, Tempo OTLP) | `stack/otelcol/config.yaml` |
-| L3 Insight | 11 SLI recording rules + 21 error-budget rules generated from the policy, 3 provisioned Grafana dashboards bound to SLIs/SLOs | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
+| L3 Insight | 11 SLI recording rules + 21 error-budget rules generated from the policy, 4 provisioned Grafana dashboards bound to SLIs/SLOs (overview, queues & channels, SLO burn, and **IBM MQ — Unified Observability**: everything on one board, 9 rows from SLOs to logs and traces) | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
 | L4 Action | 11 symptom alerts + 14 multi-window burn-rate alerts + 3 forecast alerts (the latter two generated from `spec.policy`), Alertmanager → webhook ledger, 6 runbooks with guardrails | `stack/prometheus/rules/ibmmq.alerts.yml`, `ibmmq.burn.yml`, `runbooks/` |
 | L5 Validation | canary + orders flow, 5 chaos experiments, MTTD/MTTR measurement, report | `canary/`, `harness/` |
 
@@ -49,7 +49,7 @@ fires when the first is fine and the second is not. The chaos suite proves both
 
 | | |
 |---|---|
-| Grafana | http://127.0.0.1:23000 (admin / admin) |
+| Grafana | http://127.0.0.1:23000 (admin / admin) — start at `/d/ibmmq-unified` |
 | Prometheus | http://127.0.0.1:29090 |
 | Alertmanager | http://127.0.0.1:29093 |
 | Tempo | http://127.0.0.1:23200 (API only — explore traces in Grafana) |

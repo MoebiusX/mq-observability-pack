@@ -494,6 +494,35 @@ spec:
         - { panel: per-queue-throughput,    binds_to: ref:queries.per_queue_throughput }
         - { panel: per-channel-status,      binds_to: ref:queries.per_channel_status }
 
+    # Everything on one board (SLOs, availability, queues, channels, canary/orders, qmgr
+    # resources, alerts, logs, traces, pipeline), in the shape of the KrystalineX unified
+    # dashboard. Every SLI and SLO has a bound panel here as well.
+    - id: ibmmq-unified
+      provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
+      folder: ibmmq
+      source: file://stack/grafana/dashboards/ibmmq-unified.json
+      datasources:
+        metrics: ref:platform/ds-prometheus
+        logs:    ref:platform/ds-loki
+        traces:  ref:platform/ds-tempo
+      panel_bindings:
+        - { panel: sli-qmgr-process-up,     binds_to: slis.qmgr_process_up }
+        - { panel: sli-qmgr-reachability,   binds_to: slis.qmgr_reachability }
+        - { panel: sli-queue-headroom,      binds_to: slis.queue_depth_headroom }
+        - { panel: sli-oldest-message-age,  binds_to: slis.oldest_message_age }
+        - { panel: sli-dlq-depth,           binds_to: slis.dlq_depth }
+        - { panel: sli-canary-success,      binds_to: slis.canary_success }
+        - { panel: sli-canary-p99,          binds_to: slis.canary_roundtrip_p99 }
+        - { panel: sli-log-write-latency,   binds_to: slis.log_write_latency }
+        - { panel: slo-qmgr-process-up,     binds_to: slos.qmgr_process_up_99_9 }
+        - { panel: slo-qmgr-reachability,   binds_to: slos.qmgr_reachability_99_9 }
+        - { panel: slo-queue-headroom,      binds_to: slos.queue_headroom_99_9 }
+        - { panel: slo-message-age,         binds_to: slos.message_age_99_under_60s }
+        - { panel: slo-dlq-empty,           binds_to: slos.dlq_empty_99_9 }
+        - { panel: slo-canary-success,      binds_to: slos.canary_success_99_9 }
+        - { panel: slo-canary-latency,      binds_to: slos.canary_latency_99_p99_500ms }
+        - { panel: slo-log-latency,         binds_to: slos.log_latency_99_under_20ms }
+
     # A real, provisioned dashboard rather than ref:platform/slo-burn-template: the lab has
     # no platform template service, and the harness (C7) proves it is provisioned.
     - id: ibmmq-slo-burn

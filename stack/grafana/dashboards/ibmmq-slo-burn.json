@@ -73,6 +73,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -132,6 +133,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -191,6 +193,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -250,6 +253,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -309,6 +313,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -368,6 +373,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -427,6 +433,7 @@
         "defaults": {
           "unit": "none",
           "decimals": 1,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -484,6 +491,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
