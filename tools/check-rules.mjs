@@ -33,12 +33,20 @@ for (const ba of pack.spec.policy?.burn_rate_alerts || []) for (const w of ba.wi
   if (r.labels?.slo !== ba.slo || r.labels?.severity !== w.severity) { bad++; console.error(`✗ ${name}: slo/severity labels do not match the pack window`); }
 }
 for (const f of pack.spec.policy?.forecasts || []) { const name = `${f.slo}_forecast_breach`; if (!alerts.has(name)) { bad++; console.error(`✗ forecast has no alert rule: ${name}`); } }
-// pack recording rules written as literal PromQL must match the stack expression (ref: rules are resolved by the stack author)
+// Pack recording rules written as literal PromQL must match the stack expression (ref: rules
+// are resolved by the stack author). For the labelled (generated, per-SLO) rules the
+// comparison is symmetric: every stack rule carrying labels.slo needs a pack twin with the
+// same name, slo and expression, and vice versa — a stale pack copy fails either way.
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const rkey = (name, slo, expr) => `${name}|${slo}|${norm(expr)}`;
+const stackSlo = new Set(rules.filter(x => x.record && x.labels?.slo).map(x => rkey(x.record, x.labels.slo, x.expr)));
+const packSlo = new Set(pack.spec.queries.recording_rules.filter(r => r.labels?.slo).map(r => rkey(r.name, r.labels.slo, r.expr)));
+for (const k of packSlo) if (!stackSlo.has(k)) { bad++; const [n, s] = k.split('|'); console.error(`✗ recording rule ${n}{slo="${s}"}: pack entry has no identical stack rule (regenerate: npm run burn-rules --pack-snippet)`); }
+for (const k of stackSlo) if (!packSlo.has(k)) { bad++; const [n, s] = k.split('|'); console.error(`✗ recording rule ${n}{slo="${s}"}: stack rule missing from the pack (paste tools/gen-burn-rules.mjs --pack-snippet)`); }
 for (const r of pack.spec.queries.recording_rules) {
-  if (/^ref:/.test(norm(r.expr))) continue;
-  const cands = rules.filter(x => x.record === r.name && (!r.labels?.slo || x.labels?.slo === r.labels.slo));
-  if (cands.length && !cands.some(x => norm(x.expr) === norm(r.expr))) { bad++; console.error(`✗ recording rule ${r.name}${r.labels?.slo ? `{slo="${r.labels.slo}"}` : ''}: pack expr differs from stack expr`); }
+  if (r.labels?.slo || /^ref:/.test(norm(r.expr))) continue;
+  const cands = rules.filter(x => x.record === r.name && !x.labels?.slo);
+  if (cands.length && !cands.some(x => norm(x.expr) === norm(r.expr))) { bad++; console.error(`✗ recording rule ${r.name}: pack expr differs from stack expr`); }
 }
 for (const d of pack.spec.dashboards) if (d.source) {
   const file = d.source.replace(/^file:\/\//, '');

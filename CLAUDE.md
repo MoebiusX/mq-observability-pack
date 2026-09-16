@@ -146,6 +146,10 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   `<slo>_forecast_breach`; `tools/gen-burn-rules.mjs` emits them, check-rules and C5
   require them. S5 grades symptom alerts, S6 burn-rate alerts (fast window FAIL, slow
   1h/6h window WARN: those legitimately keep burning for hours after any incident).
+  The generator's PromQL deviates from the compiler on purpose (header + evidence §8):
+  error ratio = bad samples / expected samples (missing time counts as good), the short
+  window needs ≥ 2 bad samples, forecasts regress the 1h burn and need 2h above 1×. All
+  three were measured failures of the naive forms on this stack; do not "simplify" back.
 - Conformance C6 has a hard-coded list of required metric families in
   `harness/checks/conformance.mjs`; changing which metrics an SLI depends on means
   updating that list too.

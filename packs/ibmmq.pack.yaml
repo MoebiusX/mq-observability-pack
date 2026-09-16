@@ -361,87 +361,87 @@ spec:
       # match stack/prometheus/rules/ibmmq.burn.yml verbatim (tools/check-rules.mjs compares);
       # regenerate this block with `node tools/gen-burn-rules.mjs --pack-snippet`.
       - name: ibmmq:queue_depth_headroom:error_ratio_5m
-        expr: 'avg_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s])'
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30)'
         interval: 30s
         labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
       - name: ibmmq:oldest_message_age:error_ratio_5m
-        expr: 'avg_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s])'
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30)'
         interval: 30s
         labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
       - name: ibmmq:dlq_depth:error_ratio_5m
-        expr: 'avg_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s])'
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30)'
         interval: 30s
         labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
       - name: ibmmq:canary_roundtrip_p99:error_ratio_5m
-        expr: 'avg_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s])'
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30)'
         interval: 30s
         labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
       - name: ibmmq:log_write_latency:error_ratio_5m
-        expr: 'avg_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s])'
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30)'
         interval: 30s
         labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: '(1 - sum(avg_over_time((up{job="ibmmq-native"} == bool 1)[5m:10s])) / count(up{job="ibmmq-native"})) / 0.001'
+        expr: '(sum(sum_over_time((1 - (up{job="ibmmq-native"} == bool 1))[5m:10s])) / ((count(up{job="ibmmq-native"})) * 30)) / 0.001'
         interval: 30s
         labels: { slo: qmgr_process_up_99_9, sli: qmgr_process_up, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: '(1 - sum(avg_over_time((up{job="ibmmq-native"} == bool 1)[1h:10s])) / count(up{job="ibmmq-native"})) / 0.001'
+        expr: '(sum(sum_over_time((1 - (up{job="ibmmq-native"} == bool 1))[1h:10s])) / ((count(up{job="ibmmq-native"})) * 360)) / 0.001'
         interval: 30s
         labels: { slo: qmgr_process_up_99_9, sli: qmgr_process_up, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: '(1 - sum(avg_over_time((ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2)[5m:10s])) / count(ibmmq_qmgr_status{job="ibmmq-exporter"})) / 0.001'
+        expr: '(sum(sum_over_time((1 - (ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2))[5m:10s])) / ((count(ibmmq_qmgr_status{job="ibmmq-exporter"})) * 30)) / 0.001'
         interval: 30s
         labels: { slo: qmgr_reachability_99_9, sli: qmgr_reachability, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: '(1 - sum(avg_over_time((ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2)[1h:10s])) / count(ibmmq_qmgr_status{job="ibmmq-exporter"})) / 0.001'
+        expr: '(sum(sum_over_time((1 - (ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2))[1h:10s])) / ((count(ibmmq_qmgr_status{job="ibmmq-exporter"})) * 360)) / 0.001'
         interval: 30s
         labels: { slo: qmgr_reachability_99_9, sli: qmgr_reachability, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: 'avg_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 0.001'
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30) / 0.001'
         interval: 30s
         labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: 'avg_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[1h:10s]) / 0.001'
+        expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[1h:10s]) / 360) / 0.001'
         interval: 30s
         labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: 'avg_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30) / 0.01'
         interval: 30s
         labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: 'avg_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[1h:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[1h:10s]) / 360) / 0.01'
         interval: 30s
         labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: 'avg_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 0.001'
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30) / 0.001'
         interval: 30s
         labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: 'avg_over_time((max(ibmmq:dlq_depth:max) > bool 0)[1h:10s]) / 0.001'
+        expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[1h:10s]) / 360) / 0.001'
         interval: 30s
         labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: '(1 - (sum(rate(mq_canary_attempts_total{result="ok"}[5m])) or vector(0)) / sum(rate(mq_canary_attempts_total[5m]))) / 0.001'
+        expr: '(((sum(increase(mq_canary_attempts_total[5m]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[5m])) or vector(0)))) / 30) / 0.001'
         interval: 30s
         labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: '(1 - (sum(rate(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)) / sum(rate(mq_canary_attempts_total[1h]))) / 0.001'
+        expr: '(((sum(increase(mq_canary_attempts_total[1h]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)))) / 360) / 0.001'
         interval: 30s
         labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: 'avg_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30) / 0.01'
         interval: 30s
         labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: 'avg_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[1h:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[1h:10s]) / 360) / 0.01'
         interval: 30s
         labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: 'avg_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30) / 0.01'
         interval: 30s
         labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: 'avg_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[1h:10s]) / 0.01'
+        expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[1h:10s]) / 360) / 0.01'
         interval: 30s
         labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
 

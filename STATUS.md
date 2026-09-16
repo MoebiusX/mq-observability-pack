@@ -1,5 +1,31 @@
 # STATUS
 
+## 2026-09-16 (evening) — parity with the Kafka reference pack: spec.policy compiled to rules
+
+**Goal:** make this pack the working equivalent of Observogram's
+`reference-packs/kafka.pack.yaml`. Section-by-section comparison: every Kafka section
+has an MQ counterpart and MQ is a superset (8 SLIs/SLOs vs 6, lab environment, harness).
+The one thing the pack declared and the stack did not implement was `spec.policy`:
+14 burn-rate windows over 7 SLOs and 3 forecasts, versus 2 hand-written burn alerts.
+The spec maps `policy.burn_rate_alerts` to Prometheus alerting rules and the Kafka
+pack's chaos experiments certify on exactly those alerts.
+
+**Done (commit `feat(policy)`):**
+- `tools/gen-burn-rules.mjs` generates `stack/prometheus/rules/ibmmq.burn.yml` from the
+  pack: 14 burn-rate alerts + 3 forecast alerts + 21 error-budget recording rules,
+  named/labelled as Observogram's compiler emits them. Extensions documented in evidence
+  §8 (state-style ratio SLIs via `avg_over_time`, threshold SLIs via breach fraction).
+- `ibmmq-slo-burn` is a real provisioned dashboard (was a platform template ref).
+- check-rules proves policy coverage and pack/stack expression equality; C5 requires the
+  policy alerts (24 referenced); S5 grades symptom alerts, new S6 grades burn alerts.
+- Pack version 0.2.0. `npm run generate` regenerates both generated artefacts; CI diffs.
+- Harness run 6 (conformance + synthetic, 20:40 local): **PASS 16/16**. Full
+  certification after the adversarial review of the generated PromQL: see below.
+
+**Not equivalent on purpose:** Kafka's chaos `expected_alerts` are burn-rate alerts;
+MQ's stay symptom alerts (faster, more specific) with the burn alerts observed as
+"also fired" evidence. Kafka's log backend is Elasticsearch; the lab uses Loki.
+
 ## 2026-09-16 (afternoon) — first live run on Nitro5, stack fixed until it certifies
 
 **State:** the lab runs end to end against a real MQ 10.0.0.5 queue manager on

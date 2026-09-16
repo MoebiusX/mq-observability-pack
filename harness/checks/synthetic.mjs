@@ -37,7 +37,7 @@ export async function synthetic(pack) {
   const fast = [...new Set(burn.filter(m => durationSec(m.window_long) <= 3600).map(m => m.alertname))];
   const slow = [...new Set(burn.filter(m => durationSec(m.window_long) > 3600).map(m => m.alertname))];
   const forecast = [...new Set(all.filter(m => m.kind === 'forecast').map(m => m.alertname))];
-  out.push(R('S6', 'SLO burn: no fast-window burn-rate alert firing (slow windows may still be paying for earlier incidents)',
+  out.push(R('S6', 'SLO burn: no fast-window burn-rate alert firing (slow 6h windows may still be paying for incidents of the last hours)',
     fast.length ? 'FAIL' : (slow.length || forecast.length ? 'WARN' : 'PASS'),
     [fast.length ? `fast: ${fast.join(', ')}` : null, slow.length ? `slow (informational): ${slow.join(', ')}` : null, forecast.length ? `forecast: ${forecast.join(', ')}` : null].filter(Boolean).join('; ') || 'no burn-rate or forecast alert firing',
     { fast, slow, forecast }));
