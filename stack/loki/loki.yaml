@@ -4,7 +4,7 @@ auth_enabled: false
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096
-  log_level: warn
+  log_level: info                  # /ready takes ~4-5 min after start on this config; keep the lifecycle visible
 
 common:
   instance_addr: 127.0.0.1

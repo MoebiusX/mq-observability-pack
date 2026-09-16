@@ -167,11 +167,9 @@ services:
       - lokidata:/loki
     ports:
       - "127.0.0.1:23100:3100"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 40
+    # No compose healthcheck: grafana/loki 3.x is a distroless image (no sh, wget or curl
+    # to exec, so any CMD probe fails and the service is reported unhealthy forever).
+    # Readiness is probed by the harness (C1 → /ready); Loki needs ~15-30 s after start.
 
   # ----------------------------------------------------------------- Tempo
   # Grafana Tempo is the lab's trace store (and the pack's declared production one).
