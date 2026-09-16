@@ -54,7 +54,13 @@ export function get(hObj, { waitMs = 5000, matchMsgId = null, bufSize = 65536 } 
   return new Promise((resolve, reject) => {
     const md = new mq.MQMD();
     const gmo = new mq.MQGMO();
-    gmo.Options = MQC.MQGMO_NO_SYNCPOINT | MQC.MQGMO_WAIT | MQC.MQGMO_CONVERT | MQC.MQGMO_FAIL_IF_QUIESCING;
+    // MQGMO_NO_PROPERTIES matters: the ibmmq OTel layer puts traceparent/tracestate on every
+    // message as properties. With the queue default (PROPCTL COMPAT) an MQGET without a
+    // message handle receives them as an MQRFH2 header prepended to the body (Format MQHRF2),
+    // which broke the canary's payload comparison and would corrupt the orders JSON. With
+    // NO_PROPERTIES the library swaps in its own handle (lib/mqiotel.js getTraceBefore), reads
+    // the context for the consumer span link, and the application sees the clean body.
+    gmo.Options = MQC.MQGMO_NO_SYNCPOINT | MQC.MQGMO_WAIT | MQC.MQGMO_CONVERT | MQC.MQGMO_FAIL_IF_QUIESCING | MQC.MQGMO_NO_PROPERTIES;
     gmo.WaitInterval = waitMs;
     if (matchMsgId) {
       gmo.MatchOptions = MQC.MQMO_MATCH_MSG_ID;
