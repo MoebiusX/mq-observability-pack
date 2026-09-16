@@ -1,4 +1,9 @@
 apiVersion: 1
+# Remove the datasource the lab shipped before switching traces to Tempo (see below);
+# provisioning never deletes datasources on its own.
+deleteDatasources:
+  - name: Jaeger
+    orgId: 1
 datasources:
   - name: Prometheus
     uid: prom
@@ -10,7 +15,7 @@ datasources:
       timeInterval: 10s
       exemplarTraceIdDestinations:
         - name: trace_id
-          datasourceUid: jaeger
+          datasourceUid: tempo
   - name: Loki
     uid: loki
     type: loki
@@ -21,24 +26,29 @@ datasources:
         - name: TraceID
           matcherRegex: '(?:trace_id|traceparent)[=:"\s]+(?:00-)?([0-9a-f]{32})'
           url: '$${__value.raw}'
-          datasourceUid: jaeger
-  - name: Jaeger
-    uid: jaeger
-    type: jaeger
+          datasourceUid: tempo
+  # Tempo, not Jaeger: Jaeger 2.21 dropped the v1 HTTP API that Grafana's Jaeger datasource
+  # requires (verified live: health check and search both fail against 2.21.0).
+  - name: Tempo
+    uid: tempo
+    type: tempo
     access: proxy
-    url: http://jaeger:16686
+    url: http://tempo:3200
     jsonData:
       tracesToLogsV2:
         datasourceUid: loki
         spanStartTimeShift: '-5m'
         spanEndTimeShift: '5m'
-        filterByTraceID: false
+        filterByTraceID: true
+        filterBySpanID: false
         tags: [ { key: 'service.name', value: 'service_name' } ]
       tracesToMetrics:
         datasourceUid: prom
         queries:
           - name: canary p99
             query: 'ibmmq:canary_roundtrip:p99_5m'
+      nodeGraph:
+        enabled: true
   - name: Alertmanager
     uid: alertmanager
     type: alertmanager

@@ -1,0 +1,42 @@
+# Grafana Tempo 2.10 single binary — the lab's trace store. Local filesystem storage,
+# OTLP ingest from the OTel Collector only.
+# Reference: grafana/tempo example/docker-compose/local/tempo.yaml @ v2.10.1, trimmed
+# (no memcached, no Jaeger/Zipkin/OpenCensus receivers, no metrics-generator).
+#
+# Why Tempo and not Jaeger: Jaeger 2.21 removed the v1 HTTP query API ("remove v1 http
+# endpoints the ui no longer calls", jaeger#9260) and Grafana 12.4's Jaeger datasource
+# speaks only that API, so Explore, log→trace links and the harness had nothing to talk
+# to. Tempo is also the pack's declared production trace backend (spec.environments.prod).
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317      # Tempo ≥ 2.7 defaults to localhost; must be explicit in a container
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m              # lab: cut blocks quickly so searches hit the backend soon
+
+compactor:
+  compaction:
+    block_retention: 48h              # lab retention, matches Loki/Prometheus (2d)
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+usage_report:
+  reporting_enabled: false

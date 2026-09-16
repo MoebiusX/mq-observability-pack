@@ -102,7 +102,7 @@ services:
     depends_on:
       - prometheus
       - loki
-      - jaeger
+      - tempo
     healthcheck:
       test: ["CMD", "/otelcol-contrib", "--version"]   # scratch-ish image; liveness only
       interval: 10s
@@ -173,16 +173,19 @@ services:
       timeout: 3s
       retries: 40
 
-  # ---------------------------------------------------------------- Jaeger
-  jaeger:
-    image: jaegertracing/jaeger:${JAEGER_TAG:-2.21.0}
+  # ----------------------------------------------------------------- Tempo
+  # Grafana Tempo is the lab's trace store (and the pack's declared production one).
+  # Jaeger 2.21 was tried first: that release removed the v1 HTTP query API and Grafana
+  # 12.4's Jaeger datasource speaks only v1, so Explore and log→trace links were dead.
+  tempo:
+    image: grafana/tempo:${TEMPO_TAG:-2.10.1}
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./stack/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
     ports:
-      - "127.0.0.1:26686:16686"  # UI + /api
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:16686/"]
-      interval: 3s
-      timeout: 2s
-      retries: 30
+      - "127.0.0.1:23200:3200"   # HTTP API: /ready, /api/search (TraceQL), /api/v2/traces/<id>
+    # No compose healthcheck: distroless image (no sh/wget). Harness C1 probes /ready.
 
   # --------------------------------------------------------------- Grafana
   grafana:
@@ -203,7 +206,7 @@ services:
     depends_on:
       - prometheus
       - loki
-      - jaeger
+      - tempo
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
       interval: 3s
@@ -274,4 +277,5 @@ volumes:
   qmdata:
   promdata:
   lokidata:
+  tempodata:
   otelcol-state:

@@ -2,7 +2,7 @@
 
 Self-contained IBM MQ observability lab. One `docker compose up` gives you a real
 queue manager, the full OTel-native telemetry path (collector → Prometheus / Loki /
-Jaeger / Grafana), a synthetic canary plus an orders producer/consumer pair with W3C
+Tempo / Grafana), a synthetic canary plus an orders producer/consumer pair with W3C
 trace context carried *through* MQ, and a certification harness that injects real
 faults, measures MTTD from real alert webhooks, and writes the evidence to
 `reports/cert-report.{md,html,json}`.
@@ -52,7 +52,7 @@ fires when the first is fine and the second is not. The chaos suite proves both
 | Grafana | http://127.0.0.1:23000 (admin / admin) |
 | Prometheus | http://127.0.0.1:29090 |
 | Alertmanager | http://127.0.0.1:29093 |
-| Jaeger | http://127.0.0.1:26686 |
+| Tempo | http://127.0.0.1:23200 (API only — explore traces in Grafana) |
 | Loki | http://127.0.0.1:23100 |
 | MQ console | https://127.0.0.1:29443/ibmmq/console (admin / passw0rd) |
 | MQ listener | 127.0.0.1:21414 (`DEV.APP.SVRCONN`, app / passw0rd) |
@@ -72,9 +72,9 @@ Exit code 0 PASS · 1 WARN · 2 FAIL. Checks:
   returns data; every recording rule loaded *and* producing; every alert the pack
   references (chaos `expected_alerts`, remediation triggers) exists and is healthy;
   required metric families present; dashboards + datasources provisioned; MQ JSON
-  logs parsed in Loki and app logs carry `trace_id`; Jaeger has the three services
-  and consumer `receive` spans carry a `FOLLOWS_FROM` link to a producer trace
-  (context propagated through MQ message properties); collector export counters.
+  logs parsed in Loki and app logs carry `trace_id`; Tempo has the three services
+  and consumer `receive` spans carry a span link to a producer trace (context
+  propagated through MQ message properties); collector export counters.
 * **Synthetic S1-S5** — canary volume, success ≥ 99 %, p99 < 500 ms, orders flowing,
   no pack alert firing.
 * **Chaos** — for each `validation.chaos_experiments[]` in the pack: wait for steady
@@ -107,13 +107,15 @@ CI (`.github/workflows/ci.yml`) runs all of the above on every push.
 MQ `icr.io/ibm-messaging/mq:10.0.0.5-r1` (switch to `9.4.5.1-r1` via `MQ_IMAGE_TAG`),
 mq_prometheus built from `ibm-messaging/mq-metric-samples@v6.0.0`, `ibmmq` npm 2.1.x
 (OTel propagation built in), otelcol-contrib 0.161.0, Prometheus 3.14, Alertmanager
-0.34, Loki 3.7.7, Jaeger 2.21, Grafana 12.4.11.
+0.34, Loki 3.7.7, Tempo 2.10.1, Grafana 12.4.11. Tempo rather than Jaeger 2.x on
+purpose: Jaeger 2.21 removed the v1 HTTP query API and Grafana's Jaeger datasource
+speaks only that API, so trace panes and log→trace links would be dead.
 
 ## Layout
 
 ```
 packs/ibmmq.pack.yaml          the contract
-stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, grafana
+stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
 tools/                         validate-pack, check-rules, gen-dashboards

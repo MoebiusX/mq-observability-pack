@@ -105,11 +105,13 @@ spec:
         endpoints: [http://loki:3100]
         auth: { kind: none }
         default: true
-      - id: traces-jaeger
+      # Lab/staging trace store. Tempo rather than Jaeger 2.x: Jaeger 2.21 removed the v1
+      # HTTP query API and Grafana 12.4's Jaeger datasource speaks only v1 (verified live).
+      - id: traces-tempo-lab
         signal: traces
-        product: jaeger
-        version: { declared: "2.21", min: "2.0", gating: warn }
-        endpoints: [http://jaeger:16686]
+        product: tempo
+        version: { declared: "2.10", min: "2.5", gating: warn }
+        endpoints: [http://tempo:3200]
         auth: { kind: none }
         default: true
       - id: traces-tempo
@@ -134,14 +136,14 @@ spec:
     staging:
       target: bare-k8s
       criticality: tier-2
-      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-tempo-lab }
       overrides:
         otel.sdk.sampling.ratio: 1.0
       suppress: [deploy_freezes]
     lab:
       target: bare-k8s
       criticality: tier-3
-      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-tempo-lab }
       overrides:
         otel.sdk.sampling.ratio: 1.0
         storage.metrics.retention: 2d
@@ -314,7 +316,7 @@ spec:
         endpoints: [http://loki:3100/otlp]
       traces:
         kind: otlp
-        endpoint: jaeger:4317
+        endpoint: tempo:4317
 
   # ---------------------------------------------------------------------------
   # 4. Storage
@@ -331,8 +333,8 @@ spec:
       version: "3.7"
       retention: 48h
     traces:
-      backend: jaeger
-      version: "2.21"
+      backend: tempo
+      version: "2.10"
       retention: 2d
       sampling: head-based
 
@@ -382,7 +384,7 @@ spec:
       datasources:
         metrics: ref:platform/ds-prometheus
         logs:    ref:platform/ds-loki
-        traces:  ref:platform/ds-jaeger
+        traces:  ref:platform/ds-tempo
       panel_bindings:
         - { panel: sli-qmgr-process-up,     binds_to: slis.qmgr_process_up }
         - { panel: sli-qmgr-reachability,   binds_to: slis.qmgr_reachability }

@@ -4,7 +4,7 @@
 #            (b) mq_prometheus, (c) itself  → remote-write into Prometheus
 #  logs    : filelog tails docker json logs; MQ's JSON console log is parsed into
 #            attributes (ibm_messageId, ibm_serverName, loglevel) → Loki via OTLP
-#  traces  : OTLP from canary/producer/consumer → Jaeger v2 via OTLP
+#  traces  : OTLP from canary/producer/consumer → Tempo via OTLP gRPC
 #  metrics : OTLP from the canary (round-trip histogram, attempt counters) → Prometheus
 
 extensions:
@@ -155,8 +155,8 @@ exporters:
     tls:
       insecure: true
 
-  otlp/jaeger:
-    endpoint: jaeger:4317
+  otlp/tempo:
+    endpoint: tempo:4317
     tls:
       insecure: true
 
@@ -185,4 +185,4 @@ service:
     traces:
       receivers: [ otlp ]
       processors: [ memory_limiter, resource, batch ]
-      exporters: [ otlp/jaeger ]
+      exporters: [ otlp/tempo ]
