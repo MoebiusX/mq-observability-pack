@@ -586,7 +586,9 @@ spec:
         steady_state_hypothesis: ref:slos.message_age_99_under_60s
         fault: { kind: container-stop, duration: 150s }
         expected_alerts: [ IBMMQOldestMessageAgeHigh ]
-        expected_mttd: 120s
+        # 60 s of message age must accrue before the alert threshold is even reachable, then
+        # the normal pipeline worst case (~55 s) applies. Measured live: 99.6 s and 117.9 s.
+        expected_mttd: 150s
         schedule: weekly
         environment: lab
 

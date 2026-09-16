@@ -96,7 +96,7 @@ dead. Tempo is Grafana-native and the pack's declared production trace backend.
 
 **Timing budget (why `for:` is 10-30 s).** 10 s scrape + 10 s exporter poll + 10 s rule
 eval + `for` + at most 5 s `group_wait` (2 s for SEV1) is roughly 55 s worst case
-against a 60 s `expected_mttd` (120 s for message age, which must accrue 60 s first;
+against a 60 s `expected_mttd` (150 s for message age, which must accrue 60 s first, measured 100-118 s;
 90 s for experiments that also expect `MQCanaryFailing`, which by design waits for 4
 consecutive failed probes = 40 s of a flat ok counter). Measured: `IBMMQQueueManagerDown`
 in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go back to it.

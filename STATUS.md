@@ -52,12 +52,14 @@ Commits are single-concern; read them in order, each message says what broke liv
 | 15:26Z run3 | conformance+synthetic | FAIL 13/15 | Tempo in; Loki still warming, stray-exporter DLQ |
 | 15:29Z run4 | conformance+synthetic | **PASS 15/15** | first clean pass |
 | 15:31-15:49Z | full, 5 chaos | FAIL | qmgr-down WARN (canary 105 s), listener-stopped FAIL (no channel stop); queue-full 44/34 s, consumer-stall 99.6 s, dlq-poison 47.3 s all PASS; MTTD p50 47 s |
+| 15:57-16:20Z | full, 5 chaos | WARN | all 8 alerts fired and resolved; listener-stopped now detected (`Unreachable` 57.5 s); only the canary alert late (109/108 s, old ratio rule) |
 
-### Measured lab timings (first full run)
-`IBMMQQueueManagerDown` 45 s, `IBMMQQueueFull` 34 s, `IBMMQQueueDepthHigh` 44 s,
-`IBMMQDeadLetterQueueNotEmpty` 47 s, `IBMMQOldestMessageAgeHigh` 100 s (needs 60 s of
-age first), `MQCanaryFailing` 105 s with the original 2 m / 30 s rule (now 1 m / 20 s,
-budgeted at 90 s in the pack). Resolution after recovery: 24-50 s.
+### Measured lab timings (full runs 1-2)
+`IBMMQQueueManagerDown` 39-45 s, `IBMMQQueueManagerUnreachable` 57.5 s, `IBMMQQueueFull`
+34-38 s, `IBMMQQueueDepthHigh` 44-48 s, `IBMMQDeadLetterQueueNotEmpty` 47-58 s,
+`IBMMQOldestMessageAgeHigh` 100-118 s (needs 60 s of age first; budget raised to 150 s),
+`MQCanaryFailing` 105-109 s with the ratio rule (replaced by the flat-counter rule,
+budget 90 s). Resolution after recovery: 20-88 s. Ingest lag of canary samples 3-5 s.
 
 ## Next (in order)
 1. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
