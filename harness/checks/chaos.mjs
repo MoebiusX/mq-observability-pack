@@ -2,8 +2,18 @@
 // (alert-sink receivedAt − injection timestamp) against expected_mttd, then recover
 // and confirm the alerts resolve. Real faults, real alerts, real timestamps.
 import { stop, start, runmqsc, amqsput, amqsget, composePs } from '../lib/docker.mjs';
-import { promQuery, scalar, sinkEvents, waitFor, sleep } from '../lib/http.mjs';
+import { cfg, getJSON, promQuery, scalar, sinkEvents, waitFor, sleep } from '../lib/http.mjs';
 import { durationToMs, sliExpr } from '../lib/pack.mjs';
+
+/**
+ * MTTD end-points are the alert-sink's receivedAt stamps, so injection/recovery instants are
+ * read from the sink's clock too (its /healthz returns `now`). Mixing in the host clock would
+ * expose MTTD to Windows ↔ Docker Desktop VM (WSL2) clock drift.
+ */
+async function sinkNow() {
+  const r = await getJSON(new URL('/healthz', cfg.sink));
+  return Number(r.body?.now) || Date.now();
+}
 
 /** Fault implementations, keyed by pack chaos_experiment id. */
 const faults = {
@@ -12,8 +22,20 @@ const faults = {
     recover: async () => { await start('mq'); await waitHealthy('mq', 180000); },
   },
   'listener-stopped': {
-    inject: () => runmqsc(`STOP LISTENER('SYSTEM.LISTENER.TCP.1')`),
-    recover: () => runmqsc(`START LISTENER('SYSTEM.LISTENER.TCP.1')`),
+    // STOP LISTENER alone only refuses NEW connections: the exporter, canary, producer and
+    // consumer keep their established SVRCONN conversations and nothing is observed.
+    // Force-stopping both SVRCONN channels drops those conversations; with the listener down
+    // every reconnect then fails — the "process alive, unreachable by clients" fault.
+    inject: () => runmqsc([
+      `STOP LISTENER('SYSTEM.LISTENER.TCP.1')`,
+      `STOP CHANNEL('DEV.APP.SVRCONN') MODE(FORCE)`,
+      `STOP CHANNEL('DEV.ADMIN.SVRCONN') MODE(FORCE)`,
+    ]),
+    recover: () => runmqsc([
+      `START LISTENER('SYSTEM.LISTENER.TCP.1')`,
+      `START CHANNEL('DEV.APP.SVRCONN')`,
+      `START CHANNEL('DEV.ADMIN.SVRCONN')`,
+    ]),
   },
   'queue-full': {
     // APP.BURST is defined with MAXDEPTH(200); 200 local puts fill it exactly (ratio = 1.0).
@@ -71,7 +93,7 @@ export async function chaos(pack, { only = null, log = () => {} } = {}) {
     row.sliBefore = sli ? scalar(await promQuery(sliExpr(sli))) : null;
 
     // inject
-    const injectedAt = Date.now();
+    const injectedAt = await sinkNow();
     row.injectedAt = new Date(injectedAt).toISOString();
     log(`[${exp.id}] injecting fault ${JSON.stringify(exp.fault)}`);
     try { await impl.inject(exp); } catch (e) { row.notes.push(`inject error: ${e.message}`); }
@@ -92,7 +114,7 @@ export async function chaos(pack, { only = null, log = () => {} } = {}) {
     row.others = [...new Set((await sinkEvents({ since: injectedAt })).filter(e => e.status === 'firing' && !expected.includes(e.alertname)).map(e => e.alertname))];
 
     // recover
-    const recoveredAt = Date.now();
+    const recoveredAt = await sinkNow();
     row.recoveredAt = new Date(recoveredAt).toISOString();
     log(`[${exp.id}] recovering`);
     try { await impl.recover(exp); } catch (e) { row.notes.push(`recover error: ${e.message}`); }

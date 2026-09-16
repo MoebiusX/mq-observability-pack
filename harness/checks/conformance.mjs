@@ -1,6 +1,6 @@
 // Conformance: does the running stack implement what the pack declares?
 // Every check returns { id, title, status: PASS|FAIL|WARN, detail, evidence }.
-import { cfg, ping, promQuery, promRules, promTargets, lokiQuery, jaegerServices, jaegerTraces, grafana, getJSON } from '../lib/http.mjs';
+import { cfg, ping, promQuery, promRules, promTargets, lokiQuery, tempoServices, tempoTraces, grafana, getJSON, waitFor } from '../lib/http.mjs';
 import { sliExpr, recordingRuleNames, referencedAlerts, alertKey } from '../lib/pack.mjs';
 
 const R = (id, title, status, detail, evidence) => ({ id, title, status, detail, evidence });
@@ -11,13 +11,19 @@ export async function conformance(pack) {
   // C1 — component health
   const components = [
     ['prometheus', `${cfg.prom}/-/ready`], ['alertmanager', `${cfg.am}/-/ready`], ['alert-sink', `${cfg.sink}/healthz`],
-    ['loki', `${cfg.loki}/ready`], ['jaeger', `${cfg.jaeger}/`], ['grafana', `${cfg.grafana}/api/health`], ['otel-collector', `${cfg.otelcol}/`],
+    ['loki', `${cfg.loki}/ready`], ['tempo', `${cfg.tempo}/ready`], ['grafana', `${cfg.grafana}/api/health`], ['otel-collector', `${cfg.otelcol}/`],
   ];
-  const health = [];
-  for (const [name, url] of components) health.push({ name, url, up: await ping(url) });
+  // Wait for readiness (up to 6 min, all components in parallel) instead of pinging once:
+  // Loki 3.x on this single-binary config answers /ready only ~4-5 min after start, Tempo
+  // ~15 s. Time-to-ready is recorded per component as evidence.
+  const health = await Promise.all(components.map(async ([name, url]) => {
+    const r = await waitFor(() => ping(url), { timeoutMs: 360000, intervalMs: 5000, label: `${name} ready` });
+    return { name, url, up: !!r.value, readyAfterMs: r.value ? r.elapsedMs : null };
+  }));
   const down = health.filter(h => !h.up).map(h => h.name);
+  const slow = health.filter(h => h.up && h.readyAfterMs > 10000).map(h => `${h.name} ready after ${(h.readyAfterMs / 1000).toFixed(0)}s`);
   out.push(R('C1', 'Telemetry stack components healthy', down.length ? 'FAIL' : 'PASS',
-    down.length ? `down: ${down.join(', ')}` : `${health.length}/${health.length} components answer`, health));
+    down.length ? `down after 6 min: ${down.join(', ')}` : `${health.length}/${health.length} components answer${slow.length ? ` (${slow.join(', ')})` : ''}`, health));
 
   // C2 — both MQ scrape sources up
   const targets = await promTargets();
@@ -73,7 +79,7 @@ export async function conformance(pack) {
     ['ibmmq_qmgr_status', 'ibmmq-exporter'], ['ibmmq_queue_depth', 'ibmmq-exporter'], ['ibmmq_queue_attribute_max_depth', 'ibmmq-exporter'],
     ['ibmmq_queue_oldest_message_age', 'ibmmq-exporter'], ['ibmmq_qmgr_log_write_latency_seconds', 'ibmmq-exporter'],
     ['ibmmq_channel_status_squash', 'ibmmq-exporter'], ['ibmmq_qmgr_connection_count', 'ibmmq-exporter'],
-    ['ibmmq_qmgr_commit_count', 'ibmmq-native'], ['mq_canary_attempts_total', null], ['mq_canary_roundtrip_duration_seconds_bucket', null],
+    ['ibmmq_qmgr_commit_total', 'ibmmq-native'], ['mq_canary_attempts_total', null], ['mq_canary_roundtrip_duration_seconds_bucket', null],
   ];
   const famRows = [];
   for (const [name, job] of families) {
@@ -94,39 +100,50 @@ export async function conformance(pack) {
     const r = await grafana(`/api/dashboards/uid/${d.id}`);
     dashRows.push({ id: d.id, ok: r.ok, title: r.body?.dashboard?.title ?? null, panels: r.body?.dashboard?.panels?.length ?? 0, folder: r.body?.meta?.folderTitle ?? null });
   }
+  // Grafana's /health endpoint is not implemented by every core datasource plugin (the
+  // Alertmanager datasource answers 500 "Plugin unavailable" on 12.4). When /health is not OK,
+  // fall back to a real request through Grafana's datasource proxy: that proves the
+  // provisioning and the connectivity the panels actually rely on.
+  const probe = { prom: '/api/v1/status/buildinfo', loki: '/ready', tempo: '/api/echo', alertmanager: '/api/v2/status' };
   const dsRows = [];
-  for (const uid of ['prom', 'loki', 'jaeger', 'alertmanager']) {
-    const r = await grafana(`/api/datasources/uid/${uid}/health`);
-    dsRows.push({ uid, ok: r.ok && r.body?.status === 'OK', status: r.body?.status ?? r.status, message: r.body?.message ?? null });
+  for (const uid of ['prom', 'loki', 'tempo', 'alertmanager']) {
+    const h = await grafana(`/api/datasources/uid/${uid}/health`);
+    let ok = h.ok && h.body?.status === 'OK', via = 'health';
+    if (!ok) { const p = await grafana(`/api/datasources/proxy/uid/${uid}${probe[uid]}`); ok = p.ok; via = `proxy ${probe[uid]} -> HTTP ${p.status}`; }
+    dsRows.push({ uid, ok, via, status: h.body?.status ?? h.status, message: h.body?.message ?? null });
   }
   const dashBad = dashRows.filter(r => !r.ok), dsBad = dsRows.filter(r => !r.ok);
   out.push(R('C7', 'Grafana dashboards provisioned and datasources healthy', dashBad.length || dsBad.length ? 'FAIL' : 'PASS',
     `${dashRows.filter(r => r.ok).length}/${dashRows.length} dashboards, ${dsRows.filter(r => r.ok).length}/${dsRows.length} datasources`, { dashboards: dashRows, datasources: dsRows }));
 
   // C8 — logs: MQ console JSON parsed and labelled in Loki
-  const lq = await lokiQuery('{service_name="ibmmq"}', { minutes: 30, limit: 20 });
+  // 6 h window for the queue manager: it is nearly silent at steady state (a handful of
+  // lines per hour), whereas the apps log every few seconds (30 min window below).
+  const lq = await lokiQuery('{service_name="ibmmq"}', { minutes: 360, limit: 20 });
   const lines = lq.streams.reduce((n, s) => n + (s.values?.length || 0), 0);
   const sample = lq.streams[0]?.values?.[0]?.[1] ?? null;
   const labels = lq.streams[0]?.stream ?? null;
   const appq = await lokiQuery('{service_name=~"mq-canary|orders-producer|orders-consumer"} |= "trace_id"', { minutes: 30, limit: 5 });
   const appLines = appq.streams.reduce((n, s) => n + (s.values?.length || 0), 0);
   out.push(R('C8', 'Queue manager logs in Loki (parsed MQ JSON) + app logs carry trace_id', lines > 0 && appLines > 0 ? 'PASS' : (lines > 0 || appLines > 0 ? 'WARN' : 'FAIL'),
-    `${lines} qmgr log lines, ${appLines} trace-correlated app lines in last 30m`, { qmgrLabels: labels, qmgrSample: sample, appSample: appq.streams[0]?.values?.[0]?.[1] ?? null, error: lq.error }));
+    `${lines} qmgr log lines in last 6h, ${appLines} trace-correlated app lines in last 30m`, { qmgrLabels: labels, qmgrSample: sample, appSample: appq.streams[0]?.values?.[0]?.[1] ?? null, error: lq.error }));
 
-  // C9 — traces: services present and consumer spans link to producer context
-  const services = await jaegerServices();
+  // C9 — traces: services present in Tempo and consumer receive spans carry an OTLP span link
+  // to the producer's trace (the ibmmq module adds the link from the traceparent it finds in
+  // the message properties; see canary/src/mq.mjs get()).
+  const services = await tempoServices();
   const want = ['mq-canary', 'orders-producer', 'orders-consumer'];
   const missing = want.filter(s => !services.includes(s));
   let linked = 0, consumerSpans = 0, linkExample = null;
-  const traces = await jaegerTraces('orders-consumer', { limit: 30 });
-  for (const t of traces) for (const s of t.spans || []) {
-    if (!/receive$/.test(s.operationName)) continue;
+  const traces = await tempoTraces('{ resource.service.name = "orders-consumer" && name =~ ".*receive" }', { limit: 30 });
+  for (const t of traces) for (const rs of t.resourceSpans) for (const ss of (rs.scopeSpans || rs.instrumentationLibrarySpans || [])) for (const s of (ss.spans || [])) {
+    if (!/receive$/.test(s.name || '')) continue;
     consumerSpans++;
-    const link = (s.references || []).find(r => r.refType === 'FOLLOWS_FROM' && r.traceID !== s.traceID);
-    if (link) { linked++; linkExample ||= { consumerTrace: s.traceID, linkedProducerTrace: link.traceID }; }
+    const link = (s.links || []).find(l => l.traceId && l.traceId !== s.traceId);
+    if (link) { linked++; linkExample ||= { consumerTrace: t.traceID, linkedProducerTraceId: link.traceId, linkedProducerSpanId: link.spanId }; }
   }
   const propagationOk = consumerSpans > 0 && linked > 0;
-  out.push(R('C9', 'Traces: canary/producer/consumer services in Jaeger; W3C context propagated through MQ message properties',
+  out.push(R('C9', 'Traces: canary/producer/consumer services in Tempo; W3C context propagated through MQ message properties',
     missing.length ? 'FAIL' : (propagationOk ? 'PASS' : 'WARN'),
     missing.length ? `services missing: ${missing.join(', ')}` : `${services.length} services; ${linked}/${consumerSpans} consumer receive spans link to a producer trace`,
     { services, consumerSpans, linked, linkExample }));

@@ -550,7 +550,9 @@ spec:
         steady_state_hypothesis: ref:slos.qmgr_process_up_99_9
         fault: { kind: container-stop, duration: 90s }
         expected_alerts: [ IBMMQQueueManagerDown, MQCanaryFailing ]
-        expected_mttd: 60s
+        # 90s, not 60s: IBMMQQueueManagerDown fires in ~45s (measured), but MQCanaryFailing
+        # needs ~4 failed 10 s probes before its 1m ratio drops below 0.5, plus damping.
+        expected_mttd: 90s
         schedule: weekly
         environment: lab
 
@@ -558,9 +560,11 @@ spec:
         engine: litmus
         target: ibmmq-listener
         steady_state_hypothesis: ref:slos.qmgr_reachability_99_9
-        fault: { kind: mqsc, command: "STOP LISTENER('SYSTEM.LISTENER.TCP.1')", duration: 90s }
+        # STOP LISTENER alone leaves established SVRCONN conversations working (seen live);
+        # the channels are force-stopped too so every client has to reconnect and fails.
+        fault: { kind: mqsc, command: "STOP LISTENER('SYSTEM.LISTENER.TCP.1'); STOP CHANNEL('DEV.APP.SVRCONN') MODE(FORCE); STOP CHANNEL('DEV.ADMIN.SVRCONN') MODE(FORCE)", duration: 90s }
         expected_alerts: [ IBMMQQueueManagerUnreachable, MQCanaryFailing ]
-        expected_mttd: 60s
+        expected_mttd: 90s          # same canary budget as qmgr-down
         schedule: weekly
         environment: lab
 

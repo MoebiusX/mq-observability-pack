@@ -85,7 +85,7 @@ Exit code 0 PASS · 1 WARN · 2 FAIL. Checks:
 | id | fault | expected |
 |---|---|---|
 | `qmgr-down` | `docker compose stop mq` | `IBMMQQueueManagerDown`, `MQCanaryFailing` |
-| `listener-stopped` | `STOP LISTENER('SYSTEM.LISTENER.TCP.1')` | `IBMMQQueueManagerUnreachable`, `MQCanaryFailing` |
+| `listener-stopped` | `STOP LISTENER('SYSTEM.LISTENER.TCP.1')` + `STOP CHANNEL(DEV.*.SVRCONN) MODE(FORCE)` | `IBMMQQueueManagerUnreachable`, `MQCanaryFailing` |
 | `queue-full` | 200 × `amqsput APP.BURST` (MAXDEPTH 200) | `IBMMQQueueDepthHigh`, `IBMMQQueueFull` |
 | `consumer-stall` | stop consumer 150 s | `IBMMQOldestMessageAgeHigh` |
 | `dlq-poison` | 3 × `amqsput APP.DLQ` | `IBMMQDeadLetterQueueNotEmpty` |

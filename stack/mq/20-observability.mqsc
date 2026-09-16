@@ -23,8 +23,10 @@ SET AUTHREC PROFILE('APP.**') OBJTYPE(QUEUE) PRINCIPAL('app') AUTHADD(BROWSE,GET
 SET AUTHREC OBJTYPE(QMGR) PRINCIPAL('app') AUTHADD(CONNECT,INQ,DSP)
 
 * --- Exporter needs DIS QSTATUS/CHSTATUS + $SYS subscriptions: admin already has it via mqm group.
-* Larger MAXHANDS: mq_prometheus opens one subscription per monitored queue × class.
+* Larger MAXHANDS: mq_prometheus opens one subscription per monitored queue x class.
 ALTER QMGR MAXHANDS(2048)
 
 * --- Listener: the image creates the qmgr with `crtmqm -p 1414`, i.e. SYSTEM.LISTENER.TCP.1
-* CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name.
+* CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name plus
+* STOP CHANNEL(...) MODE(FORCE) on both DEV.*.SVRCONN channels: stopping the listener alone
+* leaves established client conversations working.
