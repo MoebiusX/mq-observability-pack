@@ -19,8 +19,20 @@ pack's chaos experiments certify on exactly those alerts.
 - check-rules proves policy coverage and pack/stack expression equality; C5 requires the
   policy alerts (24 referenced); S5 grades symptom alerts, new S6 grades burn alerts.
 - Pack version 0.2.0. `npm run generate` regenerates both generated artefacts; CI diffs.
-- Harness run 6 (conformance + synthetic, 20:40 local): **PASS 16/16**. Full
-  certification after the adversarial review of the generated PromQL: see below.
+- Adversarial review of the generated PromQL on the live stack (14 agents) confirmed
+  four defects, all fixed in the generator (commit `fix(policy)`): error ratios now count
+  bad samples over the *expected* sample count (a fresh TSDB made every 6 h window a
+  since-start average), the short window needs ≥ 2 bad samples (one bad probe re-fired
+  SEV1 for an hour after any incident), forecasts regress the sustained 1 h burn instead
+  of echoing the last outage, and check-rules compares generated recording rules
+  symmetrically. The four deviations from Observogram's compiler are documented in
+  evidence §8 and the generator header.
+- **Full certification 17:44-17:56Z with the policy layer: PASS** — 10/10 conformance,
+  6/6 synthetic (S6 new), 5/5 chaos, MTTD p50 56.5 s / p95 110 s. The burn-rate alerts
+  fired for real during the experiments (`qmgr_process_up_99_9_burn_14x_5m_1h`,
+  `qmgr_reachability_99_9_burn_14x_5m_1h`, `queue_headroom_99_9_burn_14x_5m_1h`, plus the
+  30m/6h SEV2 windows) about a minute after the symptom alerts and resolved.
+  `reports/cert-report.*` holds this run.
 
 **Not equivalent on purpose:** Kafka's chaos `expected_alerts` are burn-rate alerts;
 MQ's stay symptom alerts (faster, more specific) with the burn alerts observed as
