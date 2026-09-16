@@ -194,6 +194,11 @@ exporters:
     resource_to_telemetry_conversion:
       enabled: false
     add_metric_suffixes: true
+    # The pack's pipeline contract (spec.pipelines exporters.metrics.external_labels) promises
+    # service="ibmmq" on every series the stack writes; without this only the generated
+    # recording rules carried it.
+    external_labels:
+      service: ibmmq
 
   otlphttp/loki:
     endpoint: http://loki:3100/otlp

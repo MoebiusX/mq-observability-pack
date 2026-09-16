@@ -132,6 +132,18 @@ spec:
       overrides:
         storage.metrics.retention: 13mo
         otel.sdk.sampling.ratio: 0.1
+        # Timing. The lab's rule files, Alertmanager route and exporter poll are tuned for a
+        # 10 s scrape so chaos MTTD measures the pipeline (CLAUDE.md rule 7); these are the
+        # production values a promotion applies instead. Burn-rate for: are Observogram's
+        # compiler defaults by short window.
+        prometheus.scrape_interval: 30s
+        exporter.poll_interval: 30s
+        alerts.symptom.for: 2m
+        alerts.burn_rate.for.short_5m: 2m
+        alerts.burn_rate.for.short_30m: 5m
+        alerts.burn_rate.for.short_1h: 10m
+        alertmanager.group_wait: 30s
+        alertmanager.group_wait.sev1: 10s
       promote_after: 30d
     staging:
       target: bare-k8s
