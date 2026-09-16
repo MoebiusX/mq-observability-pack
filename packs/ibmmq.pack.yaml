@@ -278,6 +278,7 @@ spec:
         scrape_configs:
           - job_name: ibmmq-native
             scrape_interval: 10s
+            honor_labels: true
             static_configs:
               - targets: [mq:9157]
           - job_name: ibmmq-exporter
@@ -368,7 +369,7 @@ spec:
         params: { metric: ibmmq_queue_depth, by: [qmgr, queue] }
       - id: per_queue_throughput
         bind: ref:platform/per-resource-rollup
-        params: { metric: ibmmq_queue_mqput_mqput1_count, by: [qmgr, queue] }
+        params: { metric: ibmmq_queue_mqput_mqput1_count, by: [qmgr, queue] }   # per-interval delta gauge: rate = sum_over_time/window (evidence §4)
       - id: per_channel_status
         bind: ref:platform/per-resource-rollup
         params: { metric: ibmmq_channel_status_squash, by: [qmgr, channel, type] }

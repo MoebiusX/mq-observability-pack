@@ -29,6 +29,7 @@ receivers:
         scrape_timeout: 8s
       scrape_configs:
         - job_name: ibmmq-native            # qmgr process itself — survives listener faults
+          honor_labels: true                # its series carry qmgr= already; without this they arrive as exported_qmgr
           static_configs:
             - targets: [ "mq:9157" ]
               labels: { qmgr: "${env:MQ_QMGR_NAME}", source: native }

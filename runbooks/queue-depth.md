@@ -4,7 +4,7 @@
 
 ## Triage
 1. Which queue? (label `queue`). Producer-side or consumer-side? `ibmmq_queue_input_handles == 0` → nobody is getting → consumer down. Input handles > 0 but `oldest_message_age` rising → consumer too slow.
-2. `rate(ibmmq_queue_mqput_mqput1_count[2m])` vs `rate(ibmmq_queue_mqget_count[2m])` on the queue: the gap is the accumulation rate; depth / gap = time to full.
+2. `sum_over_time(ibmmq_queue_mqput_mqput1_count[2m]) / 120` vs `sum_over_time(ibmmq_queue_mqget_count[2m]) / 120` on the queue (these are per-interval deltas, not counters — never `rate()` them): the gap is the accumulation rate; depth / gap = time to full.
 3. Upstream burst? Compare producer rate to baseline.
 
 ## Fix

@@ -70,4 +70,9 @@ prometheus:
   namespace: ibmmq
   keepRunning: true            # on qmgr loss keep serving ibmmq_qmgr_status{}=0 instead of dying
   reconnectInterval: 5s
-  overrideCType: true
+  # The $SYS "count" elements (MQPUT/MQGET counts etc.) are PER-INTERVAL DELTAS: one value
+  # per 10 s publication, not an accumulating total (seen live: a steady 5 msg/s producer
+  # shows a flat ~50). v6 defaults overrideCType to true, which stamps them TYPE counter and
+  # makes rate()/increase() nonsense. Keep them as gauges and derive rates with
+  # sum_over_time(...[window]) / window_seconds (see docs/catalogue-evidence/ibmmq.md §4).
+  overrideCType: false
