@@ -62,9 +62,7 @@ budgeted at 90 s in the pack). Resolution after recovery: 24-50 s.
 ## Next (in order)
 1. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
    the report in `reports/` is the artefact. Expect ~25 min.
-2. Decide whether `MQCanaryFailing` should stay a 1 m ratio (≈65-75 s detection) or
-   become a consecutive-failure rule; the 90 s experiment budget assumes the former.
-3. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
+2. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
    integration (orders bridge RabbitMQ ↔ MQ) as a separate repo/phase.
 
 ## Open decisions

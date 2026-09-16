@@ -551,8 +551,9 @@ spec:
         steady_state_hypothesis: ref:slos.qmgr_process_up_99_9
         fault: { kind: container-stop, duration: 90s }
         expected_alerts: [ IBMMQQueueManagerDown, MQCanaryFailing ]
-        # 90s, not 60s: IBMMQQueueManagerDown fires in ~45s (measured), but MQCanaryFailing
-        # needs ~4 failed 10 s probes before its 1m ratio drops below 0.5, plus damping.
+        # 90s, not 60s: IBMMQQueueManagerDown fires in ~40-45s (measured), but MQCanaryFailing
+        # by design needs 4 consecutive failed 10 s probes (40 s of silence on the ok counter)
+        # plus `for` 10 s and evaluation: ~60-70 s.
         expected_mttd: 90s
         schedule: weekly
         environment: lab
