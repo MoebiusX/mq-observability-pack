@@ -85,8 +85,11 @@ nextId = 1;
 const queues = dashboard('ibmmq-queues', 'IBM MQ — Queues & Channels', [
   ts('Depth by queue', [{ expr: 'ibmmq_queue_depth{job="ibmmq-exporter"}', legend: '{{queue}}' }], { binds: 'ref:queries.per_queue_depth', x: 0, y: 0 }),
   ts('MAXDEPTH by queue', [{ expr: 'ibmmq_queue_attribute_max_depth{job="ibmmq-exporter"}', legend: '{{queue}}' }], { x: 12, y: 0 }),
-  ts('Put rate by queue', [{ expr: 'sum by (queue)(rate(ibmmq_queue_mqput_mqput1_count{job="ibmmq-exporter"}[2m]))', legend: '{{queue}}' }], { binds: 'ref:queries.per_queue_throughput', unit: 'ops', x: 0, y: 8 }),
-  ts('Get rate by queue', [{ expr: 'sum by (queue)(rate(ibmmq_queue_mqget_count{job="ibmmq-exporter"}[2m]))', legend: '{{queue}}' }], { unit: 'ops', x: 12, y: 8 }),
+  // mq_prometheus publishes MQI counts as PER-INTERVAL DELTAS (one value per 10 s $SYS
+  // publication), scraped as gauges (overrideCType: false). Per-second rate =
+  // sum_over_time(...[2m]) / 120 — never rate() (docs/catalogue-evidence/ibmmq.md §4).
+  ts('Put rate by queue', [{ expr: 'sum by (queue)(sum_over_time(ibmmq_queue_mqput_mqput1_count{job="ibmmq-exporter"}[2m])) / 120', legend: '{{queue}}' }], { binds: 'ref:queries.per_queue_throughput', unit: 'ops', x: 0, y: 8 }),
+  ts('Get rate by queue', [{ expr: 'sum by (queue)(sum_over_time(ibmmq_queue_mqget_count{job="ibmmq-exporter"}[2m])) / 120', legend: '{{queue}}' }], { unit: 'ops', x: 12, y: 8 }),
   ts('Oldest message age by queue', [{ expr: 'ibmmq_queue_oldest_message_age{job="ibmmq-exporter"}', legend: '{{queue}}' }], { unit: 's', x: 0, y: 16 }),
   ts('Queue time (short / long sample)', [
     { expr: 'ibmmq_queue_qtime_short{job="ibmmq-exporter"}', legend: '{{queue}} short' },
@@ -98,12 +101,15 @@ const queues = dashboard('ibmmq-queues', 'IBM MQ — Queues & Channels', [
   ], { x: 0, y: 24 }),
   ts('Channel status (0 stopped · 1 transition · 2 running)', [{ expr: 'ibmmq_channel_status_squash{job="ibmmq-exporter"}', legend: '{{channel}} ({{type}})' }], { binds: 'ref:queries.per_channel_status', min: 0, max: 2, x: 12, y: 24 }),
   ts('Channel messages / bytes', [
+    // DIS CHSTATUS MSGS is cumulative per channel instance, so rate() is right here.
     { expr: 'sum by (channel)(rate(ibmmq_channel_messages{job="ibmmq-exporter"}[2m]))', legend: '{{channel}} msgs/s' },
   ], { unit: 'ops', x: 0, y: 32 }),
+  // Native endpoint names verified live against MQ 10.0.0.5: counters carry a _total suffix
+  // and gets are reported as destructive_get (docs/catalogue-evidence/ibmmq.md §4b).
   ts('Native endpoint: commits / MQI calls (qmgr-level)', [
-    { expr: 'rate(ibmmq_qmgr_commit_count{job="ibmmq-native"}[2m])', legend: 'commits/s' },
-    { expr: 'rate(ibmmq_qmgr_mqput_mqput1_count{job="ibmmq-native"}[2m])', legend: 'mqput/s' },
-    { expr: 'rate(ibmmq_qmgr_mqget_count{job="ibmmq-native"}[2m])', legend: 'mqget/s' },
+    { expr: 'rate(ibmmq_qmgr_commit_total{job="ibmmq-native"}[2m])', legend: 'commits/s' },
+    { expr: 'rate(ibmmq_qmgr_mqput_mqput1_total{job="ibmmq-native"}[2m])', legend: 'mqput/s' },
+    { expr: 'rate(ibmmq_qmgr_destructive_get_total{job="ibmmq-native"}[2m])', legend: 'destructive get/s' },
   ], { unit: 'ops', x: 12, y: 32 }),
 ], ['ibmmq', 'pack']);
 

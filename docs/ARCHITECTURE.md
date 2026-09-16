@@ -17,7 +17,7 @@
                  │  otel-collector 0.161 ◀── OTLP (spans + canary metrics) ───────┤
                  │   ├─ prometheusremotewrite ─▶ prometheus 3.14 ─▶ alertmanager ─▶ alert-sink (webhook ledger)
                  │   ├─ otlphttp ──────────────▶ loki 3.7                          │
-                 │   └─ otlp ──────────────────▶ jaeger 2.21                       │
+                 │   └─ otlp ──────────────────▶ tempo 2.10                        │
                  │                                                                │
                  │  grafana 12.4 (provisioned: datasources + IBM MQ folder)       │
                  └────────────────────────────────────────────────────────────────┘
@@ -36,7 +36,12 @@ One telemetry path for all three signals, identical to the production shape (col
 Alertmanager's `startsAt` is the evaluation time, not the delivery time. MTTD in the report is measured at the point a human/automation would first hear about it: the webhook receipt. The sink stores the raw payloads; the harness never trusts its own clock alone.
 
 ## Trace propagation through MQ
-The Node `ibmmq` module, when `@opentelemetry/api` is loaded, sets `traceparent`/`tracestate` message properties on MQPUT and, on MQGET, adds a span link from the active consumer span to the producer context. The consumer keeps a CONSUMER span active around the GET precisely so that link lands. Jaeger shows it as a `FOLLOWS_FROM` reference to another trace; conformance C9 counts them.
+The Node `ibmmq` module, when `@opentelemetry/api` is loaded, sets `traceparent`/`tracestate` message properties on MQPUT and, on MQGET, adds a span link from the active consumer span to the producer context. The consumer keeps a CONSUMER span active around the GET precisely so that link lands. Tempo stores it as an OTLP span link (Grafana renders it under "Links"); conformance C9 counts consumer `receive` spans whose link points at another trace.
+
+Getter-side detail learned live: with the queue default `PROPCTL(COMPAT)` and no message handle on the MQGET, those properties come back as an `MQRFH2` header prepended to the body (Format `MQHRF2`), which broke the canary's payload comparison and would corrupt the orders JSON. The apps therefore GET with `MQGMO_NO_PROPERTIES`; the module then swaps in its own handle, reads the context for the link, and hands the application the clean body.
+
+## Why Tempo and not Jaeger
+Jaeger 2.21 removed the v1 HTTP query API ("remove v1 http endpoints the ui no longer calls", jaeger#9260) and Grafana 12.4's Jaeger datasource speaks only that API, so Explore and the Loki → trace derived field had nothing to talk to. Tempo is Grafana-native and is the pack's declared production trace backend, so the lab now certifies the same trace path that ships.
 
 ## Chaos loop
 steady-state → inject → wait for expected alert webhooks (MTTD) → hold `fault.duration` → sample SLI → recover → wait for resolved webhooks → wait steady-state → next. One experiment at a time; the harness refuses to start an experiment while its expected alerts are still firing (with a note in the report if it times out).

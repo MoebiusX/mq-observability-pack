@@ -38,11 +38,21 @@ export async function composeImages() {
 export const stop  = (svc) => compose('stop', svc);
 export const start = (svc) => compose('start', svc);
 
-/** Run MQSC commands inside the mq container (local bindings — works even with the listener stopped). */
+/**
+ * Run MQSC commands inside the mq container (local bindings — works even with the listener
+ * stopped). runmqsc exits non-zero when any command reports a problem (e.g. STOP CHANNEL on a
+ * channel with no active instance, AMQ8420); the remaining commands still ran, so the output
+ * is returned instead of throwing and callers judge the effect through the alerts.
+ */
 export async function runmqsc(commands) {
   const script = (Array.isArray(commands) ? commands : [commands]).join('\n') + '\n';
-  const { stdout } = await compose('exec', '-T', 'mq', 'bash', '-lc', `printf '%s' ${shellQuote(script)} | runmqsc ${qmgr}`);
-  return stdout;
+  try {
+    const { stdout } = await compose('exec', '-T', 'mq', 'bash', '-lc', `printf '%s' ${shellQuote(script)} | runmqsc ${qmgr}`);
+    return stdout;
+  } catch (e) {
+    if (e && typeof e.stdout === 'string' && e.stdout.includes('AMQ8')) return e.stdout;
+    throw e;
+  }
 }
 
 /** Put `count` messages on a queue using the MQ sample amqsput (local bindings). */

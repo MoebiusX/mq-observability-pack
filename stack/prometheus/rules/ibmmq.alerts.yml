@@ -72,15 +72,26 @@ groups:
           runbook: runbooks/dlq.md
 
       # ---- synthetic canary -----------------------------------------------------
+      # "No successful probe for 40 s (4 probes at 10 s) while probes continue, or the canary
+      # is silent." Formulated on increase() of the ok counter being exactly 0 rather than on
+      # a success ratio: under Prometheus rule evaluation the rate()-based ratio only became
+      # true ~69 s after the fault and fired at 105-109 s (measured live, ALERTS_FOR_STATE),
+      # whereas a flat counter is unambiguous the moment the window has no ok increment.
+      # Detection ≈ 40 s + ingest lag (~4 s) + `for` 10 s + eval + group_wait ≈ 60-70 s.
+      # `or vector(0)` covers the case where no result="ok" series exists at all. Experiments
+      # that expect this alert budget 90 s (pack expected_mttd).
       - alert: MQCanaryFailing
         expr: |
-          (sum(rate(mq_canary_attempts_total{result="ok"}[2m])) / sum(rate(mq_canary_attempts_total[2m])) < 0.5)
+          (
+            (sum(increase(mq_canary_attempts_total{result="ok"}[40s])) or vector(0)) == 0
+              and sum(increase(mq_canary_attempts_total[40s])) > 0
+          )
             or absent(mq_canary_attempts_total)
-        for: 30s
+        for: 10s
         labels: { severity: SEV1, pack: ibmmq, sli: canary_success }
         annotations:
           summary: "Synthetic put/get canary is failing"
-          description: "Less than half of the canary round-trips succeeded over the last 2 minutes (or the canary is silent)."
+          description: "No canary round-trip has succeeded in the last 40 s although probes continue (or the canary is silent)."
           runbook: runbooks/canary.md
 
       - alert: MQCanaryLatencyHigh
@@ -99,7 +110,7 @@ groups:
           summary: "Recovery-log write latency {{ $value }}s on {{ $labels.qmgr }} — persistent-message throughput at risk"
 
       - alert: IBMMQFileSystemLow
-        expr: min by (qmgr) (ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"}) < 15
+        expr: min by (qmgr) (last_over_time(ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"}[30s])) < 15
         for: 1m
         labels: { severity: SEV2, pack: ibmmq, sli: qmgr_process_up }
         annotations:

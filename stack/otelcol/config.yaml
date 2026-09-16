@@ -4,7 +4,7 @@
 #            (b) mq_prometheus, (c) itself  → remote-write into Prometheus
 #  logs    : filelog tails docker json logs; MQ's JSON console log is parsed into
 #            attributes (ibm_messageId, ibm_serverName, loglevel) → Loki via OTLP
-#  traces  : OTLP from canary/producer/consumer → Jaeger v2 via OTLP
+#  traces  : OTLP from canary/producer/consumer → Tempo via OTLP gRPC
 #  metrics : OTLP from the canary (round-trip histogram, attempt counters) → Prometheus
 
 extensions:
@@ -29,6 +29,7 @@ receivers:
         scrape_timeout: 8s
       scrape_configs:
         - job_name: ibmmq-native            # qmgr process itself — survives listener faults
+          honor_labels: true                # its series carry qmgr= already; without this they arrive as exported_qmgr
           static_configs:
             - targets: [ "mq:9157" ]
               labels: { qmgr: "${env:MQ_QMGR_NAME}", source: native }
@@ -61,10 +62,11 @@ receivers:
         to: body
       - type: remove
         field: attributes.time
-      # IBM MQ console JSON (MQ_LOGGING_CONSOLE_FORMAT=json)
+      # IBM MQ console JSON (MQ_LOGGING_CONSOLE_FORMAT=json): AMQ log records and web-server
+      # records carry ibm_messageId; the container runtime's own lines carry type=mq_containerlog.
       - type: json_parser
         id: mq_json
-        if: 'body matches "^\\{.*\"ibm_messageId\""'
+        if: 'body matches "^\\{.*(\"ibm_messageId\"|\"type\":\"mq_containerlog\")"'
         parse_from: body
         parse_to: attributes.mq
         severity:
@@ -74,6 +76,36 @@ receivers:
             warn: WARNING
             error: ERROR
             fatal: FATAL
+      # Application JSON logs from canary / producer / consumer
+      # ({"ts","level","service","msg","trace_id","span_id",...} — canary/src/otel.mjs log()).
+      - type: json_parser
+        id: app_json
+        if: 'body matches "^\\{.*\"service\":\"[^\"]+\".*\"msg\""'
+        parse_from: body
+        parse_to: attributes.app
+      # Service identity goes on the ENTRY's resource here, in stanza. The adapter groups
+      # entries into ResourceLogs by resource, so each container's lines form their own
+      # stream. An OTTL set(resource.attributes[...]) in log context would instead mutate one
+      # resource shared by every record in the batch and mislabel other containers' lines.
+      - type: move
+        id: app_service
+        if: 'attributes.app != nil and attributes.app.service != nil'
+        from: attributes.app.service
+        to: resource["service.name"]
+      - type: add
+        id: mq_service
+        if: 'attributes.mq != nil'
+        field: resource["service.name"]
+        value: ibmmq
+      - type: add
+        id: default_service
+        if: 'resource["service.name"] == nil'
+        field: resource["service.name"]
+        value: docker
+      - type: add
+        id: service_namespace
+        field: resource["service.namespace"]
+        value: ibmmq
 
 processors:
   memory_limiter:
@@ -90,15 +122,17 @@ processors:
       - { key: deployment.environment, value: "${env:ENV}", action: upsert }
       - { key: mq.qmgr.name,           value: "${env:MQ_QMGR_NAME}", action: upsert }
 
-  # Promote MQ log fields to resource/service identity so Loki labels them sensibly.
+  # Record-level promotions only (service identity is set per entry in the filelog receiver):
+  # W3C trace context onto app records, MQ fields onto qmgr records, body = MQ message text.
   transform/mqlogs:
     error_mode: ignore
     log_statements:
       - context: log
         statements:
-          - set(resource.attributes["service.name"], "docker") where resource.attributes["service.name"] == nil
-          - set(resource.attributes["service.namespace"], "ibmmq") where resource.attributes["service.namespace"] == nil
-          - set(resource.attributes["service.name"], "ibmmq") where attributes["mq"]["ibm_messageId"] != nil
+          - set(trace_id.string, attributes["app"]["trace_id"]) where attributes["app"]["trace_id"] != nil
+          - set(span_id.string, attributes["app"]["span_id"]) where attributes["app"]["span_id"] != nil
+          - set(severity_text, attributes["app"]["level"]) where attributes["app"]["level"] != nil
+          - delete_key(attributes, "app")
           - set(attributes["mq.qmgr.name"], attributes["mq"]["ibm_serverName"]) where attributes["mq"]["ibm_serverName"] != nil
           - set(attributes["mq.message_id"], attributes["mq"]["ibm_messageId"]) where attributes["mq"]["ibm_messageId"] != nil
           - set(attributes["mq.process"], attributes["mq"]["ibm_processName"]) where attributes["mq"]["ibm_processName"] != nil
@@ -122,8 +156,8 @@ exporters:
     tls:
       insecure: true
 
-  otlp/jaeger:
-    endpoint: jaeger:4317
+  otlp/tempo:
+    endpoint: tempo:4317
     tls:
       insecure: true
 
@@ -152,4 +186,4 @@ service:
     traces:
       receivers: [ otlp ]
       processors: [ memory_limiter, resource, batch ]
-      exporters: [ otlp/jaeger ]
+      exporters: [ otlp/tempo ]

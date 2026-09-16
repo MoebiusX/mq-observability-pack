@@ -151,7 +151,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (queue)(rate(ibmmq_queue_mqput_mqput1_count{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqput_mqput1_count{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{queue}}"
         }
       ],
@@ -194,7 +194,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (queue)(rate(ibmmq_queue_mqget_count{job=\"ibmmq-exporter\"}[2m]))",
+          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqget_count{job=\"ibmmq-exporter\"}[2m])) / 120",
           "legendFormat": "{{queue}}"
         }
       ],
@@ -465,18 +465,18 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(ibmmq_qmgr_commit_count{job=\"ibmmq-native\"}[2m])",
+          "expr": "rate(ibmmq_qmgr_commit_total{job=\"ibmmq-native\"}[2m])",
           "legendFormat": "commits/s"
         },
         {
           "refId": "B",
-          "expr": "rate(ibmmq_qmgr_mqput_mqput1_count{job=\"ibmmq-native\"}[2m])",
+          "expr": "rate(ibmmq_qmgr_mqput_mqput1_total{job=\"ibmmq-native\"}[2m])",
           "legendFormat": "mqput/s"
         },
         {
           "refId": "C",
-          "expr": "rate(ibmmq_qmgr_mqget_count{job=\"ibmmq-native\"}[2m])",
-          "legendFormat": "mqget/s"
+          "expr": "rate(ibmmq_qmgr_destructive_get_total{job=\"ibmmq-native\"}[2m])",
+          "legendFormat": "destructive get/s"
         }
       ],
       "fieldConfig": {

@@ -105,11 +105,13 @@ spec:
         endpoints: [http://loki:3100]
         auth: { kind: none }
         default: true
-      - id: traces-jaeger
+      # Lab/staging trace store. Tempo rather than Jaeger 2.x: Jaeger 2.21 removed the v1
+      # HTTP query API and Grafana 12.4's Jaeger datasource speaks only v1 (verified live).
+      - id: traces-tempo-lab
         signal: traces
-        product: jaeger
-        version: { declared: "2.21", min: "2.0", gating: warn }
-        endpoints: [http://jaeger:16686]
+        product: tempo
+        version: { declared: "2.10", min: "2.5", gating: warn }
+        endpoints: [http://tempo:3200]
         auth: { kind: none }
         default: true
       - id: traces-tempo
@@ -134,14 +136,14 @@ spec:
     staging:
       target: bare-k8s
       criticality: tier-2
-      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-tempo-lab }
       overrides:
         otel.sdk.sampling.ratio: 1.0
       suppress: [deploy_freezes]
     lab:
       target: bare-k8s
       criticality: tier-3
-      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-tempo-lab }
       overrides:
         otel.sdk.sampling.ratio: 1.0
         storage.metrics.retention: 2d
@@ -160,7 +162,7 @@ spec:
       description: Fraction of queue managers whose native metrics endpoint is scraped successfully.
       semconv_metric: ibmmq.qmgr.up
       good: |
-        sum(up{job="ibmmq-native"} == 1)
+        sum(up{job="ibmmq-native"} == bool 1)
       total: |
         count(up{job="ibmmq-native"})
       owner: team-platform-sre
@@ -174,18 +176,23 @@ spec:
         listener, channel, CHLAUTH or CONNAUTH is broken while the process lives.
       semconv_metric: ibmmq.qmgr.status
       good: |
-        sum(ibmmq_qmgr_status{job="ibmmq-exporter"} == 2)
+        sum(ibmmq_qmgr_status{job="ibmmq-exporter"} == bool 2)
       total: |
         count(ibmmq_qmgr_status{job="ibmmq-exporter"})
 
     # --- Queue depth headroom ---
+    # last_over_time(...[30s]) on exporter gauges (here and below): mq_prometheus only
+    # exposes a publication-derived gauge on scrapes where a $SYS publication arrived, and
+    # with a 10 s publish interval against a 10 s scrape about 1 scrape in 12 has none
+    # (measured live: 55/60 samples). Without the window that scrape writes a staleness
+    # marker and the SLI evaluates to empty. The window costs at most one scrape of lag.
     - id: queue_depth_headroom
       type: threshold
       description: Highest current depth / MAXDEPTH across application queues. 1.0 means MQRC_Q_FULL for producers.
       semconv_metric: ibmmq.queue.depth
       query: |
         max by (qmgr, queue) (
-          ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}
+          last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
             / ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}
         )
       threshold: 0.8
@@ -198,7 +205,7 @@ spec:
       semconv_metric: ibmmq.queue.oldest_message_age
       query: |
         max by (qmgr, queue) (
-          ibmmq_queue_oldest_message_age{job="ibmmq-exporter", queue=~"APP.*", queue!="APP.DLQ"}
+          last_over_time(ibmmq_queue_oldest_message_age{job="ibmmq-exporter", queue=~"APP.*", queue!="APP.DLQ"}[30s])
         )
       threshold: 60
       unit: seconds
@@ -209,17 +216,20 @@ spec:
       description: Messages parked on the dead-letter queue. Any non-zero value is a delivery failure that needs a human.
       semconv_metric: ibmmq.queue.depth
       query: |
-        max by (qmgr) (ibmmq_queue_depth{job="ibmmq-exporter", queue="APP.DLQ"})
+        max by (qmgr) (last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue="APP.DLQ"}[30s]))
       threshold: 0
       unit: messages
 
     # --- Synthetic canary ---
     - id: canary_success
       type: ratio
-      description: Fraction of synthetic put→get round-trips that returned the matching payload within 5s.
+      description: |
+        Fraction of synthetic put→get round-trips that returned the matching payload within 5s.
+        `or vector(0)` on the good side is deliberate: when every attempt fails there is no
+        result="ok" series at all and a bare sum() is empty, not zero (seen live 2026-09-16).
       semconv_metric: mq.canary.attempts
       good: |
-        sum(rate(mq_canary_attempts_total{result="ok"}[5m]))
+        (sum(rate(mq_canary_attempts_total{result="ok"}[5m])) or vector(0))
       total: |
         sum(rate(mq_canary_attempts_total[5m]))
 
@@ -239,7 +249,7 @@ spec:
       description: Average recovery-log write latency. Persistent-message throughput is bounded by this number.
       semconv_metric: ibmmq.qmgr.log.write_latency
       query: |
-        max by (qmgr) (ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"})
+        max by (qmgr) (last_over_time(ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"}[30s]))
       threshold: 0.02
       unit: seconds
 
@@ -268,6 +278,7 @@ spec:
         scrape_configs:
           - job_name: ibmmq-native
             scrape_interval: 10s
+            honor_labels: true
             static_configs:
               - targets: [mq:9157]
           - job_name: ibmmq-exporter
@@ -287,12 +298,14 @@ spec:
         attributes:
           - { key: mq.qmgr.name,           value: "${MQ_QMGR_NAME}", action: upsert }
           - { key: deployment.environment, value: "${ENV}",          action: upsert }
+      # service identity (ibmmq / mq-canary / orders-*) is set per entry in the filelog
+      # receiver (stanza resource fields); OTTL only promotes record-level fields
       - name: transform
         log_statements:
           - context: log
             statements:
-              - set(resource.attributes["service.name"], "ibmmq") where attributes["mq"]["ibm_messageId"] != nil
               - set(attributes["mq.message_id"], attributes["mq"]["ibm_messageId"]) where attributes["mq"]["ibm_messageId"] != nil
+              - set(trace_id.string, attributes["app"]["trace_id"]) where attributes["app"]["trace_id"] != nil
 
     exporters:
       metrics:
@@ -304,7 +317,7 @@ spec:
         endpoints: [http://loki:3100/otlp]
       traces:
         kind: otlp
-        endpoint: jaeger:4317
+        endpoint: tempo:4317
 
   # ---------------------------------------------------------------------------
   # 4. Storage
@@ -321,8 +334,8 @@ spec:
       version: "3.7"
       retention: 48h
     traces:
-      backend: jaeger
-      version: "2.21"
+      backend: tempo
+      version: "2.10"
       retention: 2d
       sampling: head-based
 
@@ -356,7 +369,7 @@ spec:
         params: { metric: ibmmq_queue_depth, by: [qmgr, queue] }
       - id: per_queue_throughput
         bind: ref:platform/per-resource-rollup
-        params: { metric: ibmmq_queue_mqput_mqput1_count, by: [qmgr, queue] }
+        params: { metric: ibmmq_queue_mqput_mqput1_count, by: [qmgr, queue] }   # per-interval delta gauge: rate = sum_over_time/window (evidence §4)
       - id: per_channel_status
         bind: ref:platform/per-resource-rollup
         params: { metric: ibmmq_channel_status_squash, by: [qmgr, channel, type] }
@@ -372,7 +385,7 @@ spec:
       datasources:
         metrics: ref:platform/ds-prometheus
         logs:    ref:platform/ds-loki
-        traces:  ref:platform/ds-jaeger
+        traces:  ref:platform/ds-tempo
       panel_bindings:
         - { panel: sli-qmgr-process-up,     binds_to: slis.qmgr_process_up }
         - { panel: sli-qmgr-reachability,   binds_to: slis.qmgr_reachability }
@@ -538,7 +551,10 @@ spec:
         steady_state_hypothesis: ref:slos.qmgr_process_up_99_9
         fault: { kind: container-stop, duration: 90s }
         expected_alerts: [ IBMMQQueueManagerDown, MQCanaryFailing ]
-        expected_mttd: 60s
+        # 90s, not 60s: IBMMQQueueManagerDown fires in ~40-45s (measured), but MQCanaryFailing
+        # by design needs 4 consecutive failed 10 s probes (40 s of silence on the ok counter)
+        # plus `for` 10 s and evaluation: ~60-70 s.
+        expected_mttd: 90s
         schedule: weekly
         environment: lab
 
@@ -546,9 +562,11 @@ spec:
         engine: litmus
         target: ibmmq-listener
         steady_state_hypothesis: ref:slos.qmgr_reachability_99_9
-        fault: { kind: mqsc, command: "STOP LISTENER('SYSTEM.LISTENER.TCP.1')", duration: 90s }
+        # STOP LISTENER alone leaves established SVRCONN conversations working (seen live);
+        # the channels are force-stopped too so every client has to reconnect and fails.
+        fault: { kind: mqsc, command: "STOP LISTENER('SYSTEM.LISTENER.TCP.1'); STOP CHANNEL('DEV.APP.SVRCONN') MODE(FORCE); STOP CHANNEL('DEV.ADMIN.SVRCONN') MODE(FORCE)", duration: 90s }
         expected_alerts: [ IBMMQQueueManagerUnreachable, MQCanaryFailing ]
-        expected_mttd: 60s
+        expected_mttd: 90s          # same canary budget as qmgr-down
         schedule: weekly
         environment: lab
 
@@ -568,7 +586,9 @@ spec:
         steady_state_hypothesis: ref:slos.message_age_99_under_60s
         fault: { kind: container-stop, duration: 150s }
         expected_alerts: [ IBMMQOldestMessageAgeHigh ]
-        expected_mttd: 120s
+        # 60 s of message age must accrue before the alert threshold is even reachable, then
+        # the normal pipeline worst case (~55 s) applies. Measured live: 99.6 s and 117.9 s.
+        expected_mttd: 150s
         schedule: weekly
         environment: lab
 

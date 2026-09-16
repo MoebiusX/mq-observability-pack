@@ -34,7 +34,7 @@ export const meter = api.metrics.getMeter(serviceName, '0.1.0');
 export { api };
 
 // Structured log line with trace correlation — collector's filelog picks this up from
-// docker's json log, Loki's derived field turns trace_id into a Jaeger link.
+// docker's json log, Loki's derived field turns trace_id into a Tempo link.
 export function log(level, msg, extra = {}) {
   const span = api.trace.getSpan(api.context.active());
   const sc = span?.spanContext();

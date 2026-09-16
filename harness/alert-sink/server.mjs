@@ -13,7 +13,8 @@ const json = (res, code, body) => {
 
 createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
-  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, events: events.length });
+  // `now` lets the harness stamp fault injection on the same clock as receivedAt (no host/VM skew).
+  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, events: events.length, now: Date.now() });
   if (req.method === 'GET' && url.pathname === '/events') {
     const since = Number(url.searchParams.get('since') || 0);
     const name = url.searchParams.get('alertname');

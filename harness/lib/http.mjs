@@ -4,7 +4,7 @@ export const cfg = {
   am:      process.env.AM_URL      || 'http://127.0.0.1:29093',
   sink:    process.env.SINK_URL    || 'http://127.0.0.1:29095',
   loki:    process.env.LOKI_URL    || 'http://127.0.0.1:23100',
-  jaeger:  process.env.JAEGER_URL  || 'http://127.0.0.1:26686',
+  tempo:   process.env.TEMPO_URL   || 'http://127.0.0.1:23200',
   grafana: process.env.GRAFANA_URL || 'http://127.0.0.1:23000',
   otelcol: process.env.OTELCOL_URL || 'http://127.0.0.1:23133',
   grafanaAuth: 'Basic ' + Buffer.from(process.env.GRAFANA_AUTH || 'admin:admin').toString('base64'),
@@ -76,18 +76,35 @@ export async function lokiQuery(query, { minutes = 15, limit = 50 } = {}) {
   return { ok: true, streams: r.body.data.result || [] };
 }
 
-export async function jaegerServices() {
-  const r = await getJSON(new URL('/api/services', cfg.jaeger));
-  return r.ok ? (r.body.data || []) : [];
+/** Tempo: distinct resource.service.name values (v2 tag-values API; v1 shape tolerated). */
+export async function tempoServices() {
+  const r = await getJSON(new URL('/api/v2/search/tag/resource.service.name/values', cfg.tempo));
+  if (!r.ok) return [];
+  return (r.body.tagValues || []).map(v => (typeof v === 'string' ? v : v?.value)).filter(Boolean);
 }
 
-export async function jaegerTraces(service, { limit = 20, lookback = '1h' } = {}) {
-  const u = new URL('/api/traces', cfg.jaeger);
-  u.searchParams.set('service', service);
+/**
+ * Tempo: TraceQL search → trace IDs → each trace as OTLP JSON.
+ * Returns [{ traceID, resourceSpans }]. Span/trace IDs inside the OTLP JSON are proto-JSON
+ * encoded (base64); compare them with each other, not with the hex traceID.
+ */
+export async function tempoTraces(traceql, { limit = 20, lookbackSec = 3600 } = {}) {
+  const end = Math.floor(Date.now() / 1000), start = end - lookbackSec;
+  const u = new URL('/api/search', cfg.tempo);
+  u.searchParams.set('q', traceql);
   u.searchParams.set('limit', String(limit));
-  u.searchParams.set('lookback', lookback);
+  u.searchParams.set('start', String(start));
+  u.searchParams.set('end', String(end));
   const r = await getJSON(u, { timeoutMs: 20000 });
-  return r.ok ? (r.body.data || []) : [];
+  const ids = r.ok ? (r.body.traces || []).map(t => t.traceID).filter(Boolean) : [];
+  const out = [];
+  for (const id of ids) {
+    const t = await getJSON(new URL(`/api/v2/traces/${id}`, cfg.tempo), { timeoutMs: 20000 });
+    if (!t.ok) continue;
+    const body = t.body?.trace || t.body || {};
+    out.push({ traceID: id, resourceSpans: body.resourceSpans || body.batches || [] });
+  }
+  return out;
 }
 
 export async function grafana(path) {

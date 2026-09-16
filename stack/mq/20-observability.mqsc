@@ -1,17 +1,17 @@
-* mq-observability-pack — queue manager objects for the lab.
+* mq-observability-pack - queue manager objects for the lab. Keep this file ASCII-only.
 * Runs automatically at start (any /etc/mqm/*.mqsc). Idempotent: REPLACE everywhere.
 * The MQ Advanced for Developers image already defines DEV.QUEUE.1..3, DEV.DEAD.LETTER.QUEUE,
 * DEV.APP.SVRCONN (user app) and DEV.ADMIN.SVRCONN (user admin).
 
 * --- Turn on every monitoring source the pack relies on --------------------
-* MONQ/MONCHL(HIGH): queue/channel real-time monitoring → QTIME, MSGAGE, LGETDATE etc. (DIS QSTATUS)
+* MONQ/MONCHL(HIGH): queue/channel real-time monitoring -> QTIME, MSGAGE, LGETDATE etc. (DIS QSTATUS)
 * STATQ/STATMQI/STATCHL: statistics event messages (SYSTEM.ADMIN.STATISTICS.QUEUE), also feeds $SYS topics
-* PERFMEV: queue-depth performance events (QDPHIEV/QDEPTHHI) → SYSTEM.ADMIN.PERFM.EVENT
+* PERFMEV: queue-depth performance events (QDPHIEV/QDEPTHHI) -> SYSTEM.ADMIN.PERFM.EVENT
 * STATINT(60): statistics interval seconds (default 1800 is useless for a lab)
-ALTER QMGR MONQ(HIGH) MONCHL(HIGH) STATQ(ON) STATMQI(ON) STATCHL(HIGH) STATINT(60) PERFMEV(ENABLED) CHLEV(ENABLED) LOCALEV(ENABLED) REMOTEEV(ENABLED) STRTSTPEV(ENABLED)
+ALTER QMGR MONQ(HIGH) MONCHL(HIGH) STATQ(ON) STATMQI(ON) STATCHL(HIGH) STATINT(60) PERFMEV(ENABLED) CHLEV(ENABLED) LOCALEV(ENABLED) REMOTEEV(ENABLED) STRSTPEV(ENABLED)
 
 * --- Application queues ---------------------------------------------------
-DEFINE QLOCAL('APP.ORDERS.REQ') REPLACE DESCR('Orders request queue (producer→consumer)') MAXDEPTH(5000) MONQ(HIGH) STATQ(ON) QDPHIEV(ENABLED) QDEPTHHI(80) QDPLOEV(ENABLED) QDEPTHLO(20) DEFPSIST(YES)
+DEFINE QLOCAL('APP.ORDERS.REQ') REPLACE DESCR('Orders request queue (producer->consumer)') MAXDEPTH(5000) MONQ(HIGH) STATQ(ON) QDPHIEV(ENABLED) QDEPTHHI(80) QDPLOEV(ENABLED) QDEPTHLO(20) DEFPSIST(YES)
 DEFINE QLOCAL('APP.ORDERS.RSP') REPLACE DESCR('Orders response queue') MAXDEPTH(5000) MONQ(HIGH) STATQ(ON) DEFPSIST(YES)
 DEFINE QLOCAL('APP.BURST')      REPLACE DESCR('Chaos target: small MAXDEPTH, flooded by queue-full experiment') MAXDEPTH(200) MONQ(HIGH) STATQ(ON) QDPHIEV(ENABLED) QDEPTHHI(80) DEFPSIST(NO)
 DEFINE QLOCAL('APP.CANARY')     REPLACE DESCR('Synthetic put/get canary') MAXDEPTH(1000) MONQ(HIGH) STATQ(ON) DEFPSIST(NO)
@@ -23,8 +23,10 @@ SET AUTHREC PROFILE('APP.**') OBJTYPE(QUEUE) PRINCIPAL('app') AUTHADD(BROWSE,GET
 SET AUTHREC OBJTYPE(QMGR) PRINCIPAL('app') AUTHADD(CONNECT,INQ,DSP)
 
 * --- Exporter needs DIS QSTATUS/CHSTATUS + $SYS subscriptions: admin already has it via mqm group.
-* Larger MAXHANDS: mq_prometheus opens one subscription per monitored queue × class.
+* Larger MAXHANDS: mq_prometheus opens one subscription per monitored queue x class.
 ALTER QMGR MAXHANDS(2048)
 
 * --- Listener: the image creates the qmgr with `crtmqm -p 1414`, i.e. SYSTEM.LISTENER.TCP.1
-* CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name.
+* CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name plus
+* STOP CHANNEL(...) MODE(FORCE) on both DEV.*.SVRCONN channels: stopping the listener alone
+* leaves established client conversations working.

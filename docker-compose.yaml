@@ -47,22 +47,24 @@ services:
     ulimits:
       nofile: { soft: 10240, hard: 10240 }
     healthcheck:
-      test: ["CMD", "chkmqhealthy"]
+      test: ["CMD", "chkmqready"]   # readiness (qmgr RUNNING + listener up), not just liveness (chkmqhealthy)
       interval: 5s
       timeout: 5s
       retries: 60
       start_period: 30s
 
   # ------------------------------------------------- mq_prometheus exporter
-  # Built straight from the IBM repo at a pinned tag (v6.0.0, Jun 2026).
+  # Built from IBM source at a pinned tag (v6.0.0, Jun 2026): stack/mq-exporter/Dockerfile
+  # clones the tag inside its builder stage. A remote git build context here breaks
+  # buildx bake on Windows (see that Dockerfile's header), so the context is local.
   # Connects as an MQ client over DEV.ADMIN.SVRCONN so it sees exactly what
   # an application sees: if the listener is down, so is this exporter.
   mq-exporter:
     build:
-      context: https://github.com/ibm-messaging/mq-metric-samples.git#v6.0.0
-      dockerfile: Dockerfile
+      context: ./stack/mq-exporter
       args:
         EXPORTER: mq_prometheus
+        MQ_METRIC_SAMPLES_TAG: v6.0.0
     image: mq-obs/mq_prometheus:v6.0.0
     environment:
       IBMMQ_CONNECTION_QUEUEMANAGER: ${MQ_QMGR_NAME:-QM1}
@@ -98,9 +100,17 @@ services:
       - "127.0.0.1:28888:8888"   # collector self-metrics
       - "127.0.0.1:23133:13133"  # health_check
     depends_on:
-      - prometheus
-      - loki
-      - jaeger
+      # Scrape mq:9157 only once the queue manager is ready: otherwise a fresh start records
+      # a minute of up{job="ibmmq-native"}=0 that burns the 1h error budget and fires
+      # IBMMQAvailabilityBurnFast on a healthy stack.
+      mq:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
     healthcheck:
       test: ["CMD", "/otelcol-contrib", "--version"]   # scratch-ish image; liveness only
       interval: 10s
@@ -165,22 +175,23 @@ services:
       - lokidata:/loki
     ports:
       - "127.0.0.1:23100:3100"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 40
+    # No compose healthcheck: grafana/loki 3.x is a distroless image (no sh, wget or curl
+    # to exec, so any CMD probe fails and the service is reported unhealthy forever).
+    # Readiness is probed by the harness (C1 → /ready); Loki needs ~15-30 s after start.
 
-  # ---------------------------------------------------------------- Jaeger
-  jaeger:
-    image: jaegertracing/jaeger:${JAEGER_TAG:-2.21.0}
+  # ----------------------------------------------------------------- Tempo
+  # Grafana Tempo is the lab's trace store (and the pack's declared production one).
+  # Jaeger 2.21 was tried first: that release removed the v1 HTTP query API and Grafana
+  # 12.4's Jaeger datasource speaks only v1, so Explore and log→trace links were dead.
+  tempo:
+    image: grafana/tempo:${TEMPO_TAG:-2.10.1}
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./stack/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
     ports:
-      - "127.0.0.1:26686:16686"  # UI + /api
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:16686/"]
-      interval: 3s
-      timeout: 2s
-      retries: 30
+      - "127.0.0.1:23200:3200"   # HTTP API: /ready, /api/search (TraceQL), /api/v2/traces/<id>
+    # No compose healthcheck: distroless image (no sh/wget). Harness C1 probes /ready.
 
   # --------------------------------------------------------------- Grafana
   grafana:
@@ -201,7 +212,7 @@ services:
     depends_on:
       - prometheus
       - loki
-      - jaeger
+      - tempo
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
       interval: 3s
@@ -235,6 +246,7 @@ services:
 
   producer:
     image: mq-obs/canary:local
+    pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
       <<: *canary_env
       MODE: producer
@@ -249,6 +261,7 @@ services:
 
   consumer:
     image: mq-obs/canary:local
+    pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
       <<: *canary_env
       MODE: consumer
@@ -270,4 +283,5 @@ volumes:
   qmdata:
   promdata:
   lokidata:
+  tempodata:
   otelcol-state:
