@@ -1,0 +1,19 @@
+{
+  "name": "mq-obs-canary",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "IBM MQ synthetic canary / producer / consumer with OpenTelemetry (traces + metrics, W3C context through MQ message properties)",
+  "engines": { "node": ">=20.19" },
+  "scripts": { "start": "node src/index.mjs" },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "@opentelemetry/semantic-conventions": "^1.37.0",
+    "ibmmq": "^2.1.9"
+  }
+}

@@ -1,0 +1,73 @@
+# mq_prometheus (ibm-messaging/mq-metric-samples v6.0.0) — lab configuration.
+# Reference: config.common.yaml + cmd/mq_prometheus/config.collector.yaml in that repo.
+# Env overrides follow IBMMQ_<SECTION>_<KEY> (uppercase); compose sets queueManager/user/passwordFile.
+
+global:
+  useObjectStatus: true        # DIS QSTATUS / CHSTATUS → depth, oldest_message_age, qtime_*, channel_status
+  useResetQStats: false
+  usePublications: true        # $SYS/MQ resource publications → mqput/mqget counts, qmgr CPU/log/fs
+  useStatistics: false
+  logLevel: INFO
+  metaprefix: ""
+  pollInterval: 10s            # lab: tight, so chaos MTTD is measured by the pipeline, not the exporter
+  rediscoverInterval: 1m             # queue attributes (MAXDEPTH, USAGE) are only re-read at rediscovery
+  tzOffset: 0h
+
+connection:
+  queueManager: QM1
+  clientConnection: true
+  connName: mq(1414)
+  channel: DEV.ADMIN.SVRCONN
+  user: admin
+  passwordFile: /run/secrets/mqAdminPassword
+  replyQueue: SYSTEM.DEFAULT.MODEL.QUEUE
+  waitInterval: 3
+  metadataMap:
+    ENV: lab
+
+objects:
+  queues:
+    - APP.*
+    - DEV.*
+    - "!SYSTEM.*"
+    - "!AMQ.*"
+  channels:
+    - DEV.*
+    - "SYSTEM.DEF.*"
+  topics:
+  subscriptions:
+
+filters:
+  hideSvrConnJobname: true     # one series per SVRCONN channel, not per connection
+  showInactiveChannels: true   # a stopped channel must still be a series (status 0) or we cannot alert on it
+  hideAMQPClientId: true
+  hideMQTTClientId: true
+  queueSubscriptionSelector:
+    - PUT
+    - GET
+    - GENERAL
+  showCustomAttribute: false
+  metricInclude:
+    qmgr:
+    queues:
+    channels:
+    topics:
+    subscriptions:
+    amqpChannels:
+    mqttChannels:
+  metricExclude:
+    qmgr:
+    queues:
+    channels:
+    topics:
+    subscriptions:
+    amqpChannels:
+    mqttChannels:
+
+prometheus:
+  port: 9157
+  metricsPath: "/metrics"
+  namespace: ibmmq
+  keepRunning: true            # on qmgr loss keep serving ibmmq_qmgr_status{}=0 instead of dying
+  reconnectInterval: 5s
+  overrideCType: true

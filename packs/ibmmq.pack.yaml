@@ -1,0 +1,606 @@
+# =============================================================================
+# ObservabilityPack: ibmmq
+# -----------------------------------------------------------------------------
+# Reference pack for an IBM MQ queue manager (9.4 LTS / 10.0). Covers queue
+# manager process availability vs. client reachability (differential
+# diagnosis), queue depth headroom, message age (consumer health), dead-letter
+# queue, synthetic put/get canary, recovery-log latency, and the chaos +
+# synthetic validation set that the certification harness in this repo
+# executes end-to-end against a real queue manager.
+#
+# Sourced from public, citeable references — see
+# docs/catalogue-evidence/ibmmq.md for the per-section evidence trail.
+#
+# Tier-1 baseline: MQ carries the money-moving messages. Everything in this
+# pack is exercised by `npm run certify` (harness/) and the resulting
+# reports/cert-report.{md,html} is the certification evidence.
+# =============================================================================
+
+apiVersion: observability.platform/v1
+kind: ObservabilityPack
+
+metadata:
+  name: ibmmq
+  version: 0.1.0
+  binding: otel-grafanalabs
+  owners:
+    - team-platform-sre
+    - krystalinex-platform
+  imports:
+    - ref: platform/golden-signals-base@1.4
+    - ref: platform/std-alert-routes@3.0
+    - ref: platform/std-budget-policy@2.1
+  bindings:
+    service: ibmmq
+    environments: [prod, staging, lab]
+    criticality: tier-1
+  labels:
+    category: messaging
+    subcategory: queueing
+    pack_class: reference
+  annotations:
+    catalogue_id: messaging/ibmmq
+    docs: https://www.ibm.com/docs/en/ibm-mq/10.0.x
+    target_versions: IBM MQ 9.4.x LTS, IBM MQ 10.0.x
+    evidence: docs/catalogue-evidence/ibmmq.md
+    promote_for_certification: tier-1
+    instruments: ibmmq-qmgr-native, mq_prometheus, mq-canary
+    certification_harness: harness/run.mjs
+
+spec:
+
+  # ---------------------------------------------------------------------------
+  # OTel instrumentation contract
+  # ---------------------------------------------------------------------------
+  # Queue manager telemetry comes from two Prometheus sources: the container's
+  # native /metrics (qmgr-level, MQ_ENABLE_METRICS=true) and mq_prometheus
+  # (ibm-messaging/mq-metric-samples) connected as an MQ client for queue and
+  # channel level. Applications emit messaging.* semconv spans; the ibmmq MQI
+  # clients (Node ≥2.1.1, Go ibmmqotel, JMS) carry W3C traceparent/tracestate
+  # as message properties, so consumer spans link to producer context.
+  # ---------------------------------------------------------------------------
+  otel:
+    semconv: "1.27.0"
+    resource_attributes:
+      required:
+        - service.name
+        - service.namespace
+        - service.version
+        - service.instance.id
+        - deployment.environment
+      custom:
+        - mq.qmgr.name
+        - messaging.system
+    sdk:
+      languages: [node, java, go]
+      sampling:
+        policy: parentbased_traceidratio
+        ratio: 0.1
+      propagators: [tracecontext, baggage]
+      log_correlation: true
+
+  # ---------------------------------------------------------------------------
+  # Telemetry backend catalog
+  # ---------------------------------------------------------------------------
+  telemetry:
+    backends:
+      - id: metrics-prom
+        signal: metrics
+        product: prometheus
+        version: { declared: "3.14", min: "2.53", gating: warn }
+        endpoints: [http://prometheus:9090]
+        auth: { kind: none }
+        default: true
+      - id: metrics-mimir
+        signal: metrics
+        product: mimir
+        version: { declared: "2.13", min: "2.12", gating: warn }
+        endpoints: [https://mimir.internal/api/v1/push]
+        auth: { kind: bearer, secretRef: mimir-token }
+        tenant: messaging
+      - id: logs-loki
+        signal: logs
+        product: loki
+        version: { declared: "3.7", min: "3.0", gating: warn }
+        endpoints: [http://loki:3100]
+        auth: { kind: none }
+        default: true
+      - id: traces-jaeger
+        signal: traces
+        product: jaeger
+        version: { declared: "2.21", min: "2.0", gating: warn }
+        endpoints: [http://jaeger:16686]
+        auth: { kind: none }
+        default: true
+      - id: traces-tempo
+        signal: traces
+        product: tempo
+        version: { declared: "2.6", min: "2.5", gating: warn }
+        endpoints: [https://tempo.internal:3200]
+        auth: { kind: bearer, secretRef: tempo-token }
+
+  # ---------------------------------------------------------------------------
+  # Environments
+  # ---------------------------------------------------------------------------
+  environments:
+    prod:
+      target: ske
+      criticality: tier-1
+      backends: { metrics: metrics-mimir, logs: logs-loki, traces: traces-tempo }
+      overrides:
+        storage.metrics.retention: 13mo
+        otel.sdk.sampling.ratio: 0.1
+      promote_after: 30d
+    staging:
+      target: bare-k8s
+      criticality: tier-2
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      overrides:
+        otel.sdk.sampling.ratio: 1.0
+      suppress: [deploy_freezes]
+    lab:
+      target: bare-k8s
+      criticality: tier-3
+      backends: { metrics: metrics-prom, logs: logs-loki, traces: traces-jaeger }
+      overrides:
+        otel.sdk.sampling.ratio: 1.0
+        storage.metrics.retention: 2d
+      suppress: [deploy_freezes, maintenance_windows]
+
+  # ---------------------------------------------------------------------------
+  # 1. SLIs — MQ's vital signs. PromQL uses mq_prometheus (`ibmmq_*`) names,
+  #    the container's native endpoint (`up{job="ibmmq-native"}`) and the
+  #    canary's OTel metrics after remote-write (`mq_canary_*`).
+  # ---------------------------------------------------------------------------
+  slis:
+
+    # --- Process alive: the queue manager's own metrics endpoint answers ---
+    - id: qmgr_process_up
+      type: ratio
+      description: Fraction of queue managers whose native metrics endpoint is scraped successfully.
+      semconv_metric: ibmmq.qmgr.up
+      good: |
+        sum(up{job="ibmmq-native"} == 1)
+      total: |
+        count(up{job="ibmmq-native"})
+      owner: team-platform-sre
+
+    # --- Reachable by applications: a real MQ client (the exporter) reports RUNNING ---
+    - id: qmgr_reachability
+      type: ratio
+      description: |
+        Fraction of queue managers reporting status RUNNING (2) to a client
+        connected over a SVRCONN channel. Diverges from qmgr_process_up when the
+        listener, channel, CHLAUTH or CONNAUTH is broken while the process lives.
+      semconv_metric: ibmmq.qmgr.status
+      good: |
+        sum(ibmmq_qmgr_status{job="ibmmq-exporter"} == 2)
+      total: |
+        count(ibmmq_qmgr_status{job="ibmmq-exporter"})
+
+    # --- Queue depth headroom ---
+    - id: queue_depth_headroom
+      type: threshold
+      description: Highest current depth / MAXDEPTH across application queues. 1.0 means MQRC_Q_FULL for producers.
+      semconv_metric: ibmmq.queue.depth
+      query: |
+        max by (qmgr, queue) (
+          ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}
+            / ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}
+        )
+      threshold: 0.8
+      unit: ratio
+
+    # --- Consumer freshness ---
+    - id: oldest_message_age
+      type: threshold
+      description: Age in seconds of the oldest message on each application queue (DIS QSTATUS MSGAGE, needs MONQ). The MQ equivalent of consumer lag in seconds.
+      semconv_metric: ibmmq.queue.oldest_message_age
+      query: |
+        max by (qmgr, queue) (
+          ibmmq_queue_oldest_message_age{job="ibmmq-exporter", queue=~"APP.*", queue!="APP.DLQ"}
+        )
+      threshold: 60
+      unit: seconds
+
+    # --- Dead-letter queue ---
+    - id: dlq_depth
+      type: threshold
+      description: Messages parked on the dead-letter queue. Any non-zero value is a delivery failure that needs a human.
+      semconv_metric: ibmmq.queue.depth
+      query: |
+        max by (qmgr) (ibmmq_queue_depth{job="ibmmq-exporter", queue="APP.DLQ"})
+      threshold: 0
+      unit: messages
+
+    # --- Synthetic canary ---
+    - id: canary_success
+      type: ratio
+      description: Fraction of synthetic put→get round-trips that returned the matching payload within 5s.
+      semconv_metric: mq.canary.attempts
+      good: |
+        sum(rate(mq_canary_attempts_total{result="ok"}[5m]))
+      total: |
+        sum(rate(mq_canary_attempts_total[5m]))
+
+    - id: canary_roundtrip_p99
+      type: threshold
+      description: 99th-percentile put→get round-trip latency of the canary, client-observed.
+      semconv_metric: mq.canary.roundtrip.duration
+      query: |
+        histogram_quantile(0.99,
+          sum by (le) (rate(mq_canary_roundtrip_duration_seconds_bucket[5m])))
+      threshold: 0.5
+      unit: seconds
+
+    # --- Recovery log ---
+    - id: log_write_latency
+      type: threshold
+      description: Average recovery-log write latency. Persistent-message throughput is bounded by this number.
+      semconv_metric: ibmmq.qmgr.log.write_latency
+      query: |
+        max by (qmgr) (ibmmq_qmgr_log_write_latency_seconds{job="ibmmq-exporter"})
+      threshold: 0.02
+      unit: seconds
+
+  # ---------------------------------------------------------------------------
+  # 2. SLOs — tier-1 thresholds
+  # ---------------------------------------------------------------------------
+  slos:
+    - { id: qmgr_process_up_99_9,       sli: qmgr_process_up,      objective: 0.999,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: qmgr_reachability_99_9,     sli: qmgr_reachability,    objective: 0.999,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: queue_headroom_99_9,        sli: queue_depth_headroom, objective: 0.999,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: message_age_99_under_60s,   sli: oldest_message_age,   objective: 0.99,   window: 7d,  error_budget_policy: ref:platform/std-budget-policy }
+    - { id: dlq_empty_99_9,             sli: dlq_depth,            objective: 0.999,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: canary_success_99_9,        sli: canary_success,       objective: 0.999,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, objective: 0.99,  window: 30d, error_budget_policy: ref:platform/std-budget-policy }
+    - { id: log_latency_99_under_20ms,  sli: log_write_latency,    objective: 0.99,   window: 7d,  error_budget_policy: ref:platform/std-budget-policy }
+
+  # ---------------------------------------------------------------------------
+  # 3. Pipelines — OTel Collector (stack/otelcol/config.yaml is the executable form)
+  # ---------------------------------------------------------------------------
+  pipelines:
+    receivers:
+      - name: otlp
+        protocols: [grpc, http]
+        endpoint: 0.0.0.0:4317
+      - name: prometheus
+        scrape_configs:
+          - job_name: ibmmq-native
+            scrape_interval: 10s
+            static_configs:
+              - targets: [mq:9157]
+          - job_name: ibmmq-exporter
+            scrape_interval: 10s
+            static_configs:
+              - targets: [mq-exporter:9157]
+      - name: filelog
+        include: [/var/lib/docker/containers/*/*-json.log]
+        format: ibm-mq-console-json
+
+    processors:
+      - name: memory_limiter
+        limit_mib: 400
+      - name: batch
+        timeout: 2s
+      - name: resource
+        attributes:
+          - { key: mq.qmgr.name,           value: "${MQ_QMGR_NAME}", action: upsert }
+          - { key: deployment.environment, value: "${ENV}",          action: upsert }
+      - name: transform
+        log_statements:
+          - context: log
+            statements:
+              - set(resource.attributes["service.name"], "ibmmq") where attributes["mq"]["ibm_messageId"] != nil
+              - set(attributes["mq.message_id"], attributes["mq"]["ibm_messageId"]) where attributes["mq"]["ibm_messageId"] != nil
+
+    exporters:
+      metrics:
+        kind: prometheusremotewrite
+        endpoint: http://prometheus:9090/api/v1/write
+        external_labels: { service: ibmmq }
+      logs:
+        kind: otlphttp
+        endpoints: [http://loki:3100/otlp]
+      traces:
+        kind: otlp
+        endpoint: jaeger:4317
+
+  # ---------------------------------------------------------------------------
+  # 4. Storage
+  # ---------------------------------------------------------------------------
+  storage:
+    metrics:
+      backend: prometheus
+      version: "3.14"
+      retention: 2d
+      remote_write:
+        - url: http://prometheus:9090/api/v1/write
+    logs:
+      backend: loki
+      version: "3.7"
+      retention: 48h
+    traces:
+      backend: jaeger
+      version: "2.21"
+      retention: 2d
+      sampling: head-based
+
+  # ---------------------------------------------------------------------------
+  # 5. Queries — recording rules (stack/prometheus/rules/ibmmq.recording.yml)
+  # ---------------------------------------------------------------------------
+  queries:
+    recording_rules:
+      - { name: ibmmq:qmgr_process_up:ratio_5m,          expr: ref:slis.qmgr_process_up,                     interval: 10s }
+      - { name: ibmmq:qmgr_process_up:error_ratio_5m,    expr: 1 - ibmmq:qmgr_process_up:ratio_5m,           interval: 10s }
+      - { name: ibmmq:qmgr_reachability:ratio_5m,        expr: ref:slis.qmgr_reachability,                   interval: 10s }
+      - { name: ibmmq:qmgr_reachability:error_ratio_5m,  expr: 1 - ibmmq:qmgr_reachability:ratio_5m,         interval: 10s }
+      - { name: ibmmq:queue_depth_headroom:ratio,        expr: ref:slis.queue_depth_headroom,                interval: 10s }
+      - { name: ibmmq:oldest_message_age:seconds_max,    expr: ref:slis.oldest_message_age,                  interval: 10s }
+      - { name: ibmmq:dlq_depth:max,                     expr: ref:slis.dlq_depth,                           interval: 10s }
+      - { name: ibmmq:canary_success:ratio_5m,           expr: ref:slis.canary_success,                      interval: 10s }
+      - { name: ibmmq:canary_success:error_ratio_5m,     expr: 1 - ibmmq:canary_success:ratio_5m,            interval: 10s }
+      - { name: ibmmq:canary_roundtrip:p99_5m,           expr: ref:slis.canary_roundtrip_p99,                interval: 10s }
+      - { name: ibmmq:log_write_latency:seconds,         expr: ref:slis.log_write_latency,                   interval: 10s }
+      - { name: ibmmq:errorbudget:burn_5m,               expr: ibmmq:qmgr_process_up:error_ratio_5m / (1 - 0.999), interval: 30s, labels: { slo: qmgr_process_up_99_9 } }
+      - { name: ibmmq:errorbudget:burn_1h,               expr: ibmmq:qmgr_process_up:error_ratio_1h / (1 - 0.999), interval: 30s, labels: { slo: qmgr_process_up_99_9 } }
+      - { name: ibmmq:errorbudget:burn_5m,               expr: ibmmq:canary_success:error_ratio_5m / (1 - 0.999),  interval: 30s, labels: { slo: canary_success_99_9 } }
+      - { name: ibmmq:errorbudget:burn_1h,               expr: ibmmq:canary_success:error_ratio_1h / (1 - 0.999),  interval: 30s, labels: { slo: canary_success_99_9 } }
+
+    derived_views:
+      - id: golden_signals_ibmmq
+        bind: ref:platform/golden-signals-view
+        params: { service: ibmmq }
+      - id: per_queue_depth
+        bind: ref:platform/per-resource-rollup
+        params: { metric: ibmmq_queue_depth, by: [qmgr, queue] }
+      - id: per_queue_throughput
+        bind: ref:platform/per-resource-rollup
+        params: { metric: ibmmq_queue_mqput_mqput1_count, by: [qmgr, queue] }
+      - id: per_channel_status
+        bind: ref:platform/per-resource-rollup
+        params: { metric: ibmmq_channel_status_squash, by: [qmgr, channel, type] }
+
+  # ---------------------------------------------------------------------------
+  # 6. Dashboards (stack/grafana/dashboards/*.json, provisioned into folder "IBM MQ")
+  # ---------------------------------------------------------------------------
+  dashboards:
+    - id: ibmmq-overview
+      provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
+      folder: ibmmq
+      source: file://stack/grafana/dashboards/ibmmq-overview.json
+      datasources:
+        metrics: ref:platform/ds-prometheus
+        logs:    ref:platform/ds-loki
+        traces:  ref:platform/ds-jaeger
+      panel_bindings:
+        - { panel: sli-qmgr-process-up,     binds_to: slis.qmgr_process_up }
+        - { panel: sli-qmgr-reachability,   binds_to: slis.qmgr_reachability }
+        - { panel: sli-queue-headroom,      binds_to: slis.queue_depth_headroom }
+        - { panel: sli-oldest-message-age,  binds_to: slis.oldest_message_age }
+        - { panel: sli-dlq-depth,           binds_to: slis.dlq_depth }
+        - { panel: sli-canary-success,      binds_to: slis.canary_success }
+        - { panel: sli-canary-p99,          binds_to: slis.canary_roundtrip_p99 }
+        - { panel: sli-log-write-latency,   binds_to: slis.log_write_latency }
+        - { panel: slo-qmgr-process-up,     binds_to: slos.qmgr_process_up_99_9 }
+        - { panel: slo-canary-success,      binds_to: slos.canary_success_99_9 }
+
+    - id: ibmmq-queues
+      provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
+      folder: ibmmq
+      source: file://stack/grafana/dashboards/ibmmq-queues.json
+      datasources:
+        metrics: ref:platform/ds-prometheus
+      panel_bindings:
+        - { panel: per-queue-depth,         binds_to: ref:queries.per_queue_depth }
+        - { panel: per-queue-throughput,    binds_to: ref:queries.per_queue_throughput }
+        - { panel: per-channel-status,      binds_to: ref:queries.per_channel_status }
+
+    - id: ibmmq-slo-burn
+      provider: { kind: grafana, version: "12.4", schemaVersion: 41 }
+      folder: ibmmq
+      template: ref:platform/slo-burn-template
+      params: { slos: [ qmgr_process_up_99_9, qmgr_reachability_99_9, canary_success_99_9, message_age_99_under_60s ] }
+
+  # ---------------------------------------------------------------------------
+  # 7. Policy — multi-window burn-rate alerts (Google SRE playbook)
+  # ---------------------------------------------------------------------------
+  policy:
+    burn_rate_alerts:
+      - slo: qmgr_process_up_99_9
+        windows:
+          - { short: 5m,  long: 1h, factor: 14, severity: SEV1 }
+          - { short: 30m, long: 6h, factor: 6,  severity: SEV2 }
+      - slo: qmgr_reachability_99_9
+        windows:
+          - { short: 5m,  long: 1h, factor: 14, severity: SEV1 }
+          - { short: 30m, long: 6h, factor: 6,  severity: SEV2 }
+      - slo: canary_success_99_9
+        windows:
+          - { short: 5m,  long: 1h, factor: 14, severity: SEV1 }
+          - { short: 30m, long: 6h, factor: 6,  severity: SEV2 }
+      - slo: queue_headroom_99_9
+        windows:
+          - { short: 5m,  long: 1h, factor: 14, severity: SEV1 }
+          - { short: 30m, long: 6h, factor: 6,  severity: SEV2 }
+      - slo: message_age_99_under_60s
+        windows:
+          - { short: 10m, long: 1h, factor: 10, severity: SEV2 }
+          - { short: 1h,  long: 6h, factor: 4,  severity: SEV3 }
+      - slo: dlq_empty_99_9
+        windows:
+          - { short: 10m, long: 1h, factor: 10, severity: SEV2 }
+          - { short: 1h,  long: 6h, factor: 4,  severity: SEV3 }
+      - slo: log_latency_99_under_20ms
+        windows:
+          - { short: 15m, long: 2h, factor: 8, severity: SEV3 }
+          - { short: 1h,  long: 6h, factor: 3, severity: SEV3 }
+
+    forecasts:
+      - { slo: queue_headroom_99_9,       method: linear,                horizon: 1d, on_projected_breach: page_oncall }
+      - { slo: qmgr_process_up_99_9,      method: holt-winters,          horizon: 7d, on_projected_breach: open_ticket }
+      - { slo: message_age_99_under_60s,  method: percentile-of-history, horizon: 3d, on_projected_breach: post_warning }
+
+  # ---------------------------------------------------------------------------
+  # 8. Alerting routes (lab: everything → harness alert-sink webhook)
+  # ---------------------------------------------------------------------------
+  alerting:
+    routes:
+      - severity: SEV1
+        channels:
+          - { msteams: "#mq-oncall" }
+          - { voice:   "pagerduty://mq" }
+          - { webhook: "http://alert-sink:9095/webhook" }
+      - severity: SEV2
+        channels:
+          - { msteams: "#mq-oncall" }
+          - { webhook: "http://alert-sink:9095/webhook" }
+      - severity: SEV3
+        channels:
+          - { msteams: "#mq-team" }
+          - { webhook: "http://alert-sink:9095/webhook" }
+    dedup: ref:platform/std-dedup
+    suppress: [ maintenance_windows, deploy_freezes, dependency_outage ]
+
+  # ---------------------------------------------------------------------------
+  # 9. Remediation — guardrailed actions (runbooks/ in this repo).
+  #     trigger ids are the kebab-case form of the Prometheus alertname
+  #     (strip dashes + lowercase both sides to match; the harness does this).
+  # ---------------------------------------------------------------------------
+  remediation:
+    - trigger: alert:ibmmq-queue-manager-down
+      runbook: file://runbooks/qmgr-down.md
+      automation: argo-workflow://restart-qmgr-with-nha-quorum-check
+      guardrails:
+        max_invocations_per_hour: 2
+        requires_human_above: SEV1
+        rollback_on_failure: true
+        cooldown_after_success: 30m
+        circuit_breaker: { failures: 2, window: 1h }
+
+    - trigger: alert:ibmmq-queue-manager-unreachable
+      runbook: file://runbooks/qmgr-unreachable.md
+      automation: argo-workflow://start-listener-and-channels
+      guardrails:
+        max_invocations_per_hour: 3
+        requires_human_above: SEV1
+        rollback_on_failure: false
+        cooldown_after_success: 15m
+
+    - trigger: alert:ibmmq-queue-full
+      runbook: file://runbooks/queue-depth.md
+      automation: argo-workflow://consumer-scale-out
+      guardrails:
+        max_invocations_per_hour: 3
+        requires_human_above: SEV1
+        rollback_on_failure: true
+        cooldown_after_success: 15m
+
+    - trigger: alert:ibmmq-oldest-message-age-high
+      runbook: file://runbooks/consumer-stalled.md
+      automation: argo-workflow://consumer-scale-out
+      guardrails:
+        max_invocations_per_hour: 3
+        requires_human_above: SEV2
+        rollback_on_failure: true
+        cooldown_after_success: 15m
+
+    - trigger: alert:ibmmq-dead-letter-queue-not-empty
+      runbook: file://runbooks/dlq.md
+      automation: "manual-only"      # DLQ handling is never automated: messages may be money
+      guardrails:
+        max_invocations_per_hour: 1
+        requires_human_above: SEV3
+
+  # ---------------------------------------------------------------------------
+  # 10a. Baselines
+  # ---------------------------------------------------------------------------
+  baselines:
+    mttd_target_p50: 1m
+    mttd_target_p95: 2m
+    mttr_target_p50: 15m
+    mttr_target_p95: 45m
+    measurement_source: harness alert-sink receivedAt − fault-injection timestamp (lab); incident-mgmt + alertmanager (prod)
+    review_cadence: monthly
+    regression_gate: block_release_if_either_breaches_target
+
+  # ---------------------------------------------------------------------------
+  # 10b. Validation — chaos + synthetic. Executed by harness/checks/chaos.mjs
+  #      with docker-level faults (engine field is nominal for the lab).
+  # ---------------------------------------------------------------------------
+  validation:
+
+    chaos_experiments:
+
+      - id: qmgr-down
+        engine: litmus
+        target: ibmmq-qmgr
+        steady_state_hypothesis: ref:slos.qmgr_process_up_99_9
+        fault: { kind: container-stop, duration: 90s }
+        expected_alerts: [ IBMMQQueueManagerDown, MQCanaryFailing ]
+        expected_mttd: 60s
+        schedule: weekly
+        environment: lab
+
+      - id: listener-stopped
+        engine: litmus
+        target: ibmmq-listener
+        steady_state_hypothesis: ref:slos.qmgr_reachability_99_9
+        fault: { kind: mqsc, command: "STOP LISTENER('SYSTEM.LISTENER.TCP.1')", duration: 90s }
+        expected_alerts: [ IBMMQQueueManagerUnreachable, MQCanaryFailing ]
+        expected_mttd: 60s
+        schedule: weekly
+        environment: lab
+
+      - id: queue-full
+        engine: litmus
+        target: ibmmq-queue
+        steady_state_hypothesis: ref:slos.queue_headroom_99_9
+        fault: { kind: flood, queue: APP.BURST, count: 200, duration: 60s }
+        expected_alerts: [ IBMMQQueueDepthHigh, IBMMQQueueFull ]
+        expected_mttd: 60s
+        schedule: weekly
+        environment: lab
+
+      - id: consumer-stall
+        engine: litmus
+        target: orders-consumer
+        steady_state_hypothesis: ref:slos.message_age_99_under_60s
+        fault: { kind: container-stop, duration: 150s }
+        expected_alerts: [ IBMMQOldestMessageAgeHigh ]
+        expected_mttd: 120s
+        schedule: weekly
+        environment: lab
+
+      - id: dlq-poison
+        engine: litmus
+        target: ibmmq-dlq
+        steady_state_hypothesis: ref:slos.dlq_empty_99_9
+        fault: { kind: put-to-dlq, count: 3, duration: 60s }
+        expected_alerts: [ IBMMQDeadLetterQueueNotEmpty ]
+        expected_mttd: 60s
+        schedule: weekly
+        environment: lab
+
+    synthetic_checks:
+
+      - id: put-get-canary
+        kind: k6
+        target: mq(1414)/APP.CANARY
+        interval: 10s
+        otel_instrumentation: true
+        assertions:
+          - { put_success: true }
+          - { round_trip_latency_lt: 500ms }
+          - { payload_match: "canary-${TIMESTAMP}-${SEQ}" }
+        on_fail_severity: SEV1
+
+      - id: orders-flow
+        kind: k6
+        target: mq(1414)/APP.ORDERS.REQ
+        interval: 1s
+        otel_instrumentation: true
+        assertions:
+          - { producer_put_success: true }
+          - { consumer_span_linked_to_producer_trace: true }
+        on_fail_severity: SEV2

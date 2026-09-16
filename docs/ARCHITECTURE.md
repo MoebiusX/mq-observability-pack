@@ -1,0 +1,42 @@
+# Architecture
+
+```
+                 ┌────────────────────────────────────────────────────────────────┐
+                 │ docker compose (name: mq-obs, all ports on 127.0.0.1:2xxxx)    │
+                 │                                                                │
+  canary ──MQI──▶│  mq (QM1)  icr.io/ibm-messaging/mq:10.0.0.5-r1                │
+  producer ─────▶│   ├─ :1414 listener  DEV.APP.SVRCONN (app) / DEV.ADMIN.SVRCONN │
+  consumer ◀─────│   ├─ :9157 native /metrics  ─────────────┐                     │
+                 │   └─ stdout JSON error log ──────────┐   │                     │
+                 │                                      │   │                     │
+                 │  mq-exporter (mq_prometheus v6.0.0)  │   │                     │
+                 │   client over DEV.ADMIN.SVRCONN      │   │                     │
+                 │   :9157 ibmmq_queue_* ibmmq_channel_*│   │                     │
+                 │        │                             │   │                     │
+                 │        ▼ prometheus receiver         ▼   ▼                     │
+                 │  otel-collector 0.161 ◀── OTLP (spans + canary metrics) ───────┤
+                 │   ├─ prometheusremotewrite ─▶ prometheus 3.14 ─▶ alertmanager ─▶ alert-sink (webhook ledger)
+                 │   ├─ otlphttp ──────────────▶ loki 3.7                          │
+                 │   └─ otlp ──────────────────▶ jaeger 2.21                       │
+                 │                                                                │
+                 │  grafana 12.4 (provisioned: datasources + IBM MQ folder)       │
+                 └────────────────────────────────────────────────────────────────┘
+                                   ▲ HTTP APIs
+                 harness/run.mjs ──┘  (host, Node ≥ 20, no deps)  ─▶ reports/cert-report.{json,md,html}
+                    └─ docker compose stop/start/exec runmqsc|amqsput   (chaos faults)
+```
+
+## Why two metric sources
+Native endpoint = process liveness (qmgr-level only, S4 in the evidence doc). Client exporter = application-visible reachability + queue/channel detail. Their disagreement is a diagnosis, not noise.
+
+## Why the collector scrapes and Prometheus only receives
+One telemetry path for all three signals, identical to the production shape (collector → Mimir/Tempo/Loki), so the lab certifies the same pipeline configuration that ships.
+
+## Why the alert ledger
+Alertmanager's `startsAt` is the evaluation time, not the delivery time. MTTD in the report is measured at the point a human/automation would first hear about it: the webhook receipt. The sink stores the raw payloads; the harness never trusts its own clock alone.
+
+## Trace propagation through MQ
+The Node `ibmmq` module, when `@opentelemetry/api` is loaded, sets `traceparent`/`tracestate` message properties on MQPUT and, on MQGET, adds a span link from the active consumer span to the producer context. The consumer keeps a CONSUMER span active around the GET precisely so that link lands. Jaeger shows it as a `FOLLOWS_FROM` reference to another trace; conformance C9 counts them.
+
+## Chaos loop
+steady-state → inject → wait for expected alert webhooks (MTTD) → hold `fault.duration` → sample SLI → recover → wait for resolved webhooks → wait steady-state → next. One experiment at a time; the harness refuses to start an experiment while its expected alerts are still firing (with a note in the report if it times out).

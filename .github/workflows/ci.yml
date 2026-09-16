@@ -1,0 +1,27 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm test
+      - run: node tools/check-rules.mjs
+      - run: docker compose config --quiet
+      - name: promtool
+        run: |
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.14.0/prometheus-3.14.0.linux-amd64.tar.gz | tar xz --strip-components=1 prometheus-3.14.0.linux-amd64/promtool
+          ./promtool check config stack/prometheus/prometheus.yml
+          ./promtool check rules stack/prometheus/rules/*.yml
+      - name: otelcol validate
+        run: |
+          curl -sSL https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz | tar xz otelcol-contrib
+          ENV=lab MQ_QMGR_NAME=QM1 ./otelcol-contrib validate --config=stack/otelcol/config.yaml
+      - name: amtool
+        run: |
+          curl -sSL https://github.com/prometheus/alertmanager/releases/download/v0.34.0/alertmanager-0.34.0.linux-amd64.tar.gz | tar xz --strip-components=1 alertmanager-0.34.0.linux-amd64/amtool
+          ./amtool check-config stack/alertmanager/alertmanager.yml
+      - name: dashboards are generated, not hand-edited
+        run: node tools/gen-dashboards.mjs && git diff --exit-code stack/grafana/dashboards

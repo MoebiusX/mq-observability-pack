@@ -1,0 +1,126 @@
+# Alert rules for the IBM MQ pack. Every alert carries:
+#   severity  SEV1..SEV3 (pack vocabulary, routed by Alertmanager)
+#   pack      ibmmq
+#   sli       the SLI id it protects (packs/ibmmq.pack.yaml)
+# `for` durations are lab-tuned (10s scrape, 10s exporter poll) so that MTTD is
+# dominated by the pipeline, not by alert damping. Production packs raise these.
+groups:
+  - name: ibmmq.symptoms
+    interval: 10s
+    rules:
+
+      # ---- differential diagnosis: process vs reachability --------------------
+      - alert: IBMMQQueueManagerDown
+        expr: up{job="ibmmq-native"} == 0
+        for: 20s
+        labels: { severity: SEV1, pack: ibmmq, sli: qmgr_process_up }
+        annotations:
+          summary: "Queue manager process is down ({{ $labels.qmgr }})"
+          description: "The queue manager's native metrics endpoint (:9157) is not answering. The container or qmgr process is gone."
+          runbook: runbooks/qmgr-down.md
+
+      - alert: IBMMQQueueManagerUnreachable
+        expr: |
+          (ibmmq_qmgr_status{job="ibmmq-exporter"} != 2)
+            and on () (up{job="ibmmq-native"} == 1)
+        for: 20s
+        labels: { severity: SEV1, pack: ibmmq, sli: qmgr_reachability }
+        annotations:
+          summary: "Queue manager {{ $labels.qmgr }} is running but not reachable by clients"
+          description: "Native metrics answer but the client-side exporter cannot connect (status={{ $value }}). Listener, SVRCONN channel, CHLAUTH or CONNAUTH fault."
+          runbook: runbooks/qmgr-unreachable.md
+
+      - alert: IBMMQExporterDown
+        expr: up{job="ibmmq-exporter"} == 0
+        for: 30s
+        labels: { severity: SEV2, pack: ibmmq, sli: qmgr_reachability }
+        annotations:
+          summary: "mq_prometheus exporter is not being scraped"
+          description: "Queue/channel-level telemetry is blind. Everything below this line is unobservable until it recovers."
+
+      # ---- queues ---------------------------------------------------------------
+      - alert: IBMMQQueueDepthHigh
+        expr: ibmmq:queue_depth_headroom:ratio > 0.8
+        for: 20s
+        labels: { severity: SEV2, pack: ibmmq, sli: queue_depth_headroom }
+        annotations:
+          summary: "{{ $labels.queue }} on {{ $labels.qmgr }} at {{ $value | humanizePercentage }} of MAXDEPTH"
+          runbook: runbooks/queue-depth.md
+
+      - alert: IBMMQQueueFull
+        expr: ibmmq:queue_depth_headroom:ratio >= 1
+        for: 10s
+        labels: { severity: SEV1, pack: ibmmq, sli: queue_depth_headroom }
+        annotations:
+          summary: "{{ $labels.queue }} on {{ $labels.qmgr }} is FULL — producers get MQRC_Q_FULL (2053)"
+          runbook: runbooks/queue-depth.md
+
+      - alert: IBMMQOldestMessageAgeHigh
+        expr: ibmmq:oldest_message_age:seconds_max > 60
+        for: 20s
+        labels: { severity: SEV2, pack: ibmmq, sli: oldest_message_age }
+        annotations:
+          summary: "Oldest message on {{ $labels.queue }} is {{ $value }}s old — consumer stalled or too slow"
+          runbook: runbooks/consumer-stalled.md
+
+      - alert: IBMMQDeadLetterQueueNotEmpty
+        expr: ibmmq:dlq_depth:max > 0
+        for: 20s
+        labels: { severity: SEV2, pack: ibmmq, sli: dlq_depth }
+        annotations:
+          summary: "{{ $value }} message(s) on the dead-letter queue of {{ $labels.qmgr }}"
+          runbook: runbooks/dlq.md
+
+      # ---- synthetic canary -----------------------------------------------------
+      - alert: MQCanaryFailing
+        expr: |
+          (sum(rate(mq_canary_attempts_total{result="ok"}[2m])) / sum(rate(mq_canary_attempts_total[2m])) < 0.5)
+            or absent(mq_canary_attempts_total)
+        for: 30s
+        labels: { severity: SEV1, pack: ibmmq, sli: canary_success }
+        annotations:
+          summary: "Synthetic put/get canary is failing"
+          description: "Less than half of the canary round-trips succeeded over the last 2 minutes (or the canary is silent)."
+          runbook: runbooks/canary.md
+
+      - alert: MQCanaryLatencyHigh
+        expr: ibmmq:canary_roundtrip:p99_5m > 0.5
+        for: 1m
+        labels: { severity: SEV3, pack: ibmmq, sli: canary_roundtrip_p99 }
+        annotations:
+          summary: "Canary p99 round-trip is {{ $value }}s (> 500ms)"
+
+      # ---- queue manager internals ---------------------------------------------
+      - alert: IBMMQLogWriteLatencyHigh
+        expr: ibmmq:log_write_latency:seconds > 0.02
+        for: 1m
+        labels: { severity: SEV3, pack: ibmmq, sli: log_write_latency }
+        annotations:
+          summary: "Recovery-log write latency {{ $value }}s on {{ $labels.qmgr }} — persistent-message throughput at risk"
+
+      - alert: IBMMQFileSystemLow
+        expr: min by (qmgr) (ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job="ibmmq-exporter"}) < 15
+        for: 1m
+        labels: { severity: SEV2, pack: ibmmq, sli: qmgr_process_up }
+        annotations:
+          summary: "Queue manager filesystem below 15% free on {{ $labels.qmgr }}"
+
+  - name: ibmmq.burnrate
+    interval: 30s
+    rules:
+      - alert: IBMMQAvailabilityBurnFast
+        expr: |
+          ibmmq:errorbudget:burn_5m{slo="qmgr_process_up_99_9"} > 14
+            and ibmmq:errorbudget:burn_1h{slo="qmgr_process_up_99_9"} > 14
+        for: 30s
+        labels: { severity: SEV1, pack: ibmmq, slo: qmgr_process_up_99_9 }
+        annotations:
+          summary: "Availability SLO burning >14x (5m & 1h windows)"
+      - alert: MQCanarySuccessBurnFast
+        expr: |
+          ibmmq:errorbudget:burn_5m{slo="canary_success_99_9"} > 14
+            and ibmmq:errorbudget:burn_1h{slo="canary_success_99_9"} > 14
+        for: 30s
+        labels: { severity: SEV1, pack: ibmmq, slo: canary_success_99_9 }
+        annotations:
+          summary: "Canary-success SLO burning >14x (5m & 1h windows)"

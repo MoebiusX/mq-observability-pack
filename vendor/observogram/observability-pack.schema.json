@@ -1,0 +1,556 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.example/schemas/observability-pack/v1.json",
+  "title": "ObservabilityPack",
+  "description": "Platform-standard manifest binding OTel instrumentation, SLIs/SLOs, telemetry pipelines, storage, queries, dashboards, alert policy, routing, self-healing, baselines, and validation for one service. Default binding is OTel + Prometheus + Elasticsearch + Grafana.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "type": "string", "const": "observability.platform/v1" },
+    "kind":       { "type": "string", "const": "ObservabilityPack" },
+    "metadata":   { "$ref": "#/$defs/Metadata" },
+    "spec":       { "$ref": "#/$defs/Spec" }
+  },
+
+  "$defs": {
+
+    "Slug":     { "type": "string", "pattern": "^[a-z][a-z0-9_-]*[a-z0-9]$", "minLength": 2, "maxLength": 64 },
+    "SemVer":   { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-.]+)?(?:\\+[0-9A-Za-z-.]+)?$" },
+    "Duration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h|d|w|mo|y))+$" },
+    "Ref":      { "type": "string", "pattern": "^(ref:[A-Za-z0-9_./-]+(@[0-9.]+)?|slis\\.[a-z][a-z0-9_-]*|slos\\.[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$" },
+    "Severity":    { "type": "string", "enum": ["SEV1","SEV2","SEV3","SEV4"] },
+    "Criticality": { "type": "string", "enum": ["tier-1","tier-2","tier-3"] },
+    "Binding":     { "type": "string", "enum": ["otel-elastic-prometheus-grafana","otel-grafanalabs","otel-aws-managed","otel-multi-backend","legacy"] },
+    "Target":      { "type": "string", "enum": ["ske","bare-k8s","azure"] },
+    "GatingMode":  { "type": "string", "enum": ["off","warn","enforce"] },
+    "Signal":      { "type": "string", "enum": ["metrics","logs","traces","profiles","network","policy","mesh","gateway","collection","alerting","dashboards"] },
+    "Product":     { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "minLength": 2, "maxLength": 40,
+                     "description": "Open product registry. Known products (jaeger, tempo, zipkin, skywalking, pinpoint, prometheus, mimir, thanos, victoriametrics, influxdb, opentsdb, elasticsearch, opensearch, loki, clickhouse, graylog, grafana, kibana, perses, pyroscope, cilium, kubernetes, opa, envoy, consul, kong, traefik, fluentbit, beats, vector, alloy, alertmanager) are recognised by lint; unknown values are accepted but flagged (registry/unknown_product)." },
+    "BackendRef":  { "type": "string", "pattern": "^(ref:[A-Za-z0-9_./-]+|[a-z][a-z0-9_-]*)$" },
+    "VersionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "declared":     { "type": "string" },
+        "min":          { "type": "string" },
+        "max":          { "type": "string" },
+        "gating":       { "$ref": "#/$defs/GatingMode" },
+        "capabilities": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" } }
+      }
+    },
+    "Auth": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind":      { "type": "string", "enum": ["none","bearer","basic","header","serviceaccount"] },
+        "secretRef": { "type": "string", "description": "Name of a Kubernetes secret holding the credential. Tokens are never inlined." },
+        "tenant":    { "type": "string" },
+        "orgId":     { "type": "string" }
+      }
+    },
+    "BackendInstance": {
+      "type": "object",
+      "required": ["name","endpoints"],
+      "additionalProperties": false,
+      "properties": {
+        "name":      { "$ref": "#/$defs/Slug" },
+        "endpoints": { "type": "array", "minItems": 1, "items": { "type": "string", "format": "uri" } },
+        "auth":      { "$ref": "#/$defs/Auth" },
+        "tenant":    { "type": "string" }
+      }
+    },
+    "Backend": {
+      "type": "object",
+      "required": ["id","signal","product"],
+      "additionalProperties": false,
+      "properties": {
+        "id":        { "$ref": "#/$defs/Slug" },
+        "signal":    { "$ref": "#/$defs/Signal" },
+        "product":   { "$ref": "#/$defs/Product" },
+        "version":   { "$ref": "#/$defs/VersionSpec" },
+        "endpoints": { "type": "array", "items": { "type": "string", "format": "uri" } },
+        "instances": { "type": "array", "items": { "$ref": "#/$defs/BackendInstance" } },
+        "auth":      { "$ref": "#/$defs/Auth" },
+        "tenant":    { "type": "string" },
+        "default":   { "type": "boolean" }
+      }
+    },
+
+    "Metadata": {
+      "type": "object",
+      "required": ["name","version","owners","bindings"],
+      "additionalProperties": false,
+      "properties": {
+        "name":    { "$ref": "#/$defs/Slug" },
+        "version": { "$ref": "#/$defs/SemVer" },
+        "binding": { "$ref": "#/$defs/Binding" },
+        "owners":  { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Slug" } },
+        "imports": { "type": "array", "items": { "type": "object", "required": ["ref"], "additionalProperties": false,
+                     "properties": { "ref": { "type": "string" }, "with": { "type": "object", "additionalProperties": true } } } },
+        "bindings": {
+          "type": "object",
+          "required": ["service","environments","criticality"],
+          "additionalProperties": false,
+          "properties": {
+            "service":        { "$ref": "#/$defs/Slug" },
+            "environments":   { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Slug" } },
+            "criticality":    { "$ref": "#/$defs/Criticality" },
+            "default_target": { "$ref": "#/$defs/Target" }
+          }
+        },
+        "labels":      { "type": "object", "additionalProperties": { "type": "string" } },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "Spec": {
+      "type": "object",
+      "required": ["otel","slis","slos","pipelines","queries","dashboards","policy","alerting","baselines","validation"],
+      "additionalProperties": false,
+      "properties": {
+        "otel":        { "$ref": "#/$defs/Otel" },
+        "slis":        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SLI" } },
+        "slos":        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SLO" } },
+        "telemetry":   { "$ref": "#/$defs/Telemetry" },
+        "environments":{ "$ref": "#/$defs/Environments" },
+        "pipelines":   { "$ref": "#/$defs/Pipelines" },
+        "storage":     { "$ref": "#/$defs/Storage" },
+        "queries":     { "$ref": "#/$defs/Queries" },
+        "dashboards":  { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Dashboard" } },
+        "profiling":   { "$ref": "#/$defs/Profiling" },
+        "network":     { "$ref": "#/$defs/Network" },
+        "policy_engine":{ "$ref": "#/$defs/PolicyEngine" },
+        "mesh":        { "type": "array", "items": { "$ref": "#/$defs/MeshComponent" } },
+        "collection":  { "type": "array", "items": { "$ref": "#/$defs/CollectionComponent" } },
+        "policy":      { "$ref": "#/$defs/Policy" },
+        "alerting":    { "$ref": "#/$defs/Alerting" },
+        "remediation": { "type": "array", "items": { "$ref": "#/$defs/Remediation" } },
+        "baselines":   { "$ref": "#/$defs/Baselines" },
+        "validation":  { "$ref": "#/$defs/Validation" }
+      }
+    },
+
+    "Otel": {
+      "type": "object",
+      "required": ["semconv","resource_attributes","sdk"],
+      "additionalProperties": false,
+      "properties": {
+        "semconv": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "resource_attributes": {
+          "type": "object",
+          "required": ["required"],
+          "additionalProperties": false,
+          "properties": {
+            "required": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "enum": ["service.name","service.namespace","service.version","service.instance.id","deployment.environment","host.name","k8s.pod.name","k8s.namespace.name"] },
+              "contains": { "const": "service.name" }
+            },
+            "custom": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" } }
+          }
+        },
+        "sdk": {
+          "type": "object",
+          "required": ["languages","sampling","propagators"],
+          "additionalProperties": false,
+          "properties": {
+            "languages":   { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["java","node","python","go","dotnet","ruby","php","rust","cpp"] } },
+            "sampling": {
+              "type": "object",
+              "required": ["policy"],
+              "additionalProperties": false,
+              "properties": {
+                "policy": { "type": "string", "enum": ["parentbased_always_on","parentbased_always_off","parentbased_traceidratio","always_on","always_off","traceidratio"] },
+                "ratio":  { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            },
+            "propagators":     { "type": "array", "items": { "type": "string", "enum": ["tracecontext","baggage","b3","b3multi","jaeger","xray","ottrace"] } },
+            "log_correlation": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "SLI": {
+      "type": "object",
+      "required": ["id","type"],
+      "additionalProperties": false,
+      "properties": {
+        "id":             { "$ref": "#/$defs/Slug" },
+        "description":    { "type": "string" },
+        "owner":          { "$ref": "#/$defs/Slug" },
+        "type":           { "type": "string", "enum": ["ratio","threshold","distribution","custom"] },
+        "semconv_metric": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
+        "good":           { "type": "string" },
+        "total":          { "type": "string" },
+        "query":          { "type": "string" },
+        "threshold":      { "type": "number" },
+        "unit":           { "type": "string" },
+        "percentile":     { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+        "expression":     { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "ratio" } } },        "then": { "required": ["good","total"] } },
+        { "if": { "properties": { "type": { "const": "threshold" } } },    "then": { "required": ["query","threshold"] } },
+        { "if": { "properties": { "type": { "const": "distribution" } } }, "then": { "required": ["query","percentile","threshold"] } },
+        { "if": { "properties": { "type": { "const": "custom" } } },       "then": { "required": ["expression"] } }
+      ]
+    },
+
+    "SLO": {
+      "type": "object",
+      "required": ["id","sli","objective","window","error_budget_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "id":                  { "$ref": "#/$defs/Slug" },
+        "sli":                 { "$ref": "#/$defs/Ref" },
+        "objective":           { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "window":              { "type": "string", "enum": ["7d","28d","30d","90d"] },
+        "error_budget_policy": { "type": "string" },
+        "labels":              { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "Pipelines": {
+      "type": "object",
+      "required": ["receivers","processors","exporters"],
+      "additionalProperties": false,
+      "properties": {
+        "receivers":  { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["name"], "additionalProperties": true,
+                        "properties": { "name": { "$ref": "#/$defs/Product" } } } },
+        "processors": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["name"], "additionalProperties": true,
+                        "properties": { "name": { "type": "string" } } } },
+        "exporters": {
+          "type": "object",
+          "required": ["metrics","logs","traces"],
+          "additionalProperties": false,
+          "properties": {
+            "metrics": { "$ref": "#/$defs/Exporter" },
+            "logs":    { "$ref": "#/$defs/Exporter" },
+            "traces":  { "$ref": "#/$defs/Exporter" }
+          }
+        }
+      }
+    },
+
+    "Exporter": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "$ref": "#/$defs/Product" }
+      }
+    },
+
+    "Storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "type": "object",
+          "required": ["backend"],
+          "additionalProperties": false,
+          "properties": {
+            "backend":   { "$ref": "#/$defs/Product" },
+            "version":   { "type": "string" },
+            "min_version": { "type": "string" },
+            "gating":    { "$ref": "#/$defs/GatingMode" },
+            "backend_ref": { "$ref": "#/$defs/BackendRef" },
+            "retention": { "$ref": "#/$defs/Duration" },
+            "remote_write": { "type": "array", "items": { "type": "object", "required": ["url"], "additionalProperties": false,
+                              "properties": { "url": { "type": "string", "format": "uri" }, "tenant": { "type": "string" } } } },
+            "downsample": { "type": "array", "items": { "type": "object", "required": ["resolution","retain_for"], "additionalProperties": false,
+                              "properties": { "resolution": { "$ref": "#/$defs/Duration" }, "retain_for": { "$ref": "#/$defs/Duration" } } } }
+          }
+        },
+        "logs": {
+          "type": "object",
+          "required": ["backend"],
+          "additionalProperties": false,
+          "properties": {
+            "backend":     { "$ref": "#/$defs/Product" },
+            "version":     { "type": "string" },
+            "min_version": { "type": "string" },
+            "gating":      { "$ref": "#/$defs/GatingMode" },
+            "backend_ref": { "$ref": "#/$defs/BackendRef" },
+            "data_stream": { "type": "string" },
+            "ilm_policy":  { "$ref": "#/$defs/Ref" },
+            "retention":   { "$ref": "#/$defs/Duration" }
+          }
+        },
+        "traces": {
+          "type": "object",
+          "required": ["backend"],
+          "additionalProperties": false,
+          "properties": {
+            "backend":     { "$ref": "#/$defs/Product" },
+            "version":     { "type": "string" },
+            "min_version": { "type": "string" },
+            "gating":      { "$ref": "#/$defs/GatingMode" },
+            "backend_ref": { "$ref": "#/$defs/BackendRef" },
+            "data_stream": { "type": "string" },
+            "ilm_policy":  { "$ref": "#/$defs/Ref" },
+            "retention":   { "$ref": "#/$defs/Duration" },
+            "sampling":    { "type": "string", "enum": ["head-based","tail-based","probabilistic"] }
+          }
+        }
+      }
+    },
+
+    "Queries": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recording_rules": { "type": "array", "items": { "type": "object", "required": ["name","expr"], "additionalProperties": false,
+                              "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*:[a-z0-9_]+$" },
+                                              "expr": { "type": "string" },
+                                              "interval": { "$ref": "#/$defs/Duration" },
+                                              "labels": { "type": "object", "additionalProperties": { "type": "string" } } } } },
+        "derived_views":   { "type": "array", "items": { "type": "object", "required": ["id"], "additionalProperties": false,
+                              "properties": { "id": { "$ref": "#/$defs/Slug" },
+                                              "bind": { "$ref": "#/$defs/Ref" },
+                                              "params": { "type": "object", "additionalProperties": true } } } }
+      }
+    },
+
+    "Dashboard": {
+      "type": "object",
+      "required": ["id","provider"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/Slug" },
+        "provider": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind":          { "type": "string", "enum": ["grafana","kibana","perses"] },
+            "version":       { "type": "string" },
+            "schemaVersion": { "type": "integer", "minimum": 30 }
+          }
+        },
+        "folder":   { "type": "string" },
+        "source":   { "type": "string" },
+        "template": { "$ref": "#/$defs/Ref" },
+        "params":   { "type": "object", "additionalProperties": true },
+        "datasources": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Ref" },
+                         "properties": { "metrics": { "$ref": "#/$defs/Ref" },
+                                         "logs":    { "$ref": "#/$defs/Ref" },
+                                         "traces":  { "$ref": "#/$defs/Ref" } } },
+        "panel_bindings": { "type": "array", "items": { "type": "object", "required": ["panel","binds_to"], "additionalProperties": false,
+                              "properties": { "panel": { "type": "string" }, "binds_to": { "$ref": "#/$defs/Ref" } } } }
+      },
+      "oneOf": [ { "required": ["source"] }, { "required": ["template"] } ]
+    },
+
+    "Policy": {
+      "type": "object",
+      "required": ["burn_rate_alerts"],
+      "additionalProperties": false,
+      "properties": {
+        "burn_rate_alerts": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["slo","windows"], "additionalProperties": false,
+                                "properties": { "slo": { "$ref": "#/$defs/Ref" },
+                                                "windows": { "type": "array", "minItems": 2, "items": { "type": "object",
+                                                  "required": ["short","long","factor","severity"], "additionalProperties": false,
+                                                  "properties": { "short": { "$ref": "#/$defs/Duration" },
+                                                                  "long":  { "$ref": "#/$defs/Duration" },
+                                                                  "factor":{ "type": "number", "exclusiveMinimum": 1 },
+                                                                  "severity": { "$ref": "#/$defs/Severity" } } } } } } },
+        "forecasts": { "type": "array", "items": { "type": "object", "required": ["slo","method","horizon"], "additionalProperties": false,
+                         "properties": { "slo": { "$ref": "#/$defs/Ref" },
+                                         "method": { "type": "string", "enum": ["linear","holt-winters","percentile-of-history"] },
+                                         "horizon": { "$ref": "#/$defs/Duration" },
+                                         "on_projected_breach": { "type": "string", "enum": ["open_ticket","post_warning","page_oncall"] } } } }
+      }
+    },
+
+    "Channel": { "type": "object", "additionalProperties": false, "minProperties": 1, "maxProperties": 1,
+                 "properties": { "msteams":  { "type": "string" },
+                                 "voice":    { "type": "string" },
+                                 "whatsapp": { "type": "string" },
+                                 "email":    { "type": "string" },
+                                 "webhook":  { "type": "string", "format": "uri" } } },
+
+    "Alerting": {
+      "type": "object",
+      "required": ["routes"],
+      "additionalProperties": false,
+      "properties": {
+        "routes": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["severity","channels"], "additionalProperties": false,
+                      "properties": { "severity": { "$ref": "#/$defs/Severity" },
+                                      "channels": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Channel" } },
+                                      "match":    { "type": "object", "additionalProperties": { "type": "string" } } } } },
+        "dedup":    { "$ref": "#/$defs/Ref" },
+        "suppress": { "type": "array", "items": { "type": "string", "enum": ["maintenance_windows","deploy_freezes","dependency_outage"] } }
+      }
+    },
+
+    "Remediation": {
+      "type": "object",
+      "required": ["trigger","runbook","automation","guardrails"],
+      "additionalProperties": false,
+      "properties": {
+        "trigger":    { "type": "string", "pattern": "^alert:[a-z][a-z0-9_-]*$" },
+        "runbook":    { "type": "string" },
+        "automation": { "type": "string" },
+        "guardrails": {
+          "type": "object",
+          "required": ["max_invocations_per_hour"],
+          "additionalProperties": false,
+          "properties": {
+            "max_invocations_per_hour": { "type": "integer", "minimum": 1 },
+            "requires_human_above":     { "$ref": "#/$defs/Severity" },
+            "rollback_on_failure":      { "type": "boolean" },
+            "cooldown_after_success":   { "$ref": "#/$defs/Duration" },
+            "circuit_breaker": { "type": "object", "required": ["failures","window"], "additionalProperties": false,
+                                  "properties": { "failures": { "type": "integer", "minimum": 1 },
+                                                  "window":   { "$ref": "#/$defs/Duration" } } }
+          }
+        }
+      }
+    },
+
+    "Baselines": {
+      "type": "object",
+      "required": ["mttd_target_p50","mttr_target_p50"],
+      "additionalProperties": false,
+      "properties": {
+        "mttd_target_p50":    { "$ref": "#/$defs/Duration" },
+        "mttr_target_p50":    { "$ref": "#/$defs/Duration" },
+        "mttd_target_p95":    { "$ref": "#/$defs/Duration" },
+        "mttr_target_p95":    { "$ref": "#/$defs/Duration" },
+        "measurement_source": { "type": "string" },
+        "review_cadence":     { "type": "string", "enum": ["weekly","monthly","quarterly"] },
+        "regression_gate":    { "type": "string", "enum": ["warn_only","block_release_if_p50_mttd_breaches_target","block_release_if_p50_mttr_breaches_target","block_release_if_either_breaches_target"] }
+      }
+    },
+
+    "Validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chaos_experiments": { "type": "array", "items": { "type": "object",
+              "required": ["id","engine","target","steady_state_hypothesis","expected_alerts","expected_mttd","schedule"],
+              "additionalProperties": false,
+              "properties": {
+                "id":     { "$ref": "#/$defs/Slug" },
+                "engine": { "type": "string", "enum": ["chaos-mesh","litmus","gremlin"] },
+                "target": { "type": "string" },
+                "steady_state_hypothesis": { "$ref": "#/$defs/Ref" },
+                "fault":  { "type": "object", "required": ["kind"], "additionalProperties": true,
+                            "properties": { "kind": { "type": "string" },
+                                            "duration": { "$ref": "#/$defs/Duration" },
+                                            "fraction": { "type": "number", "minimum": 0, "maximum": 1 } } },
+                "expected_alerts": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                "expected_mttd":   { "$ref": "#/$defs/Duration" },
+                "schedule":        { "type": "string", "enum": ["daily","weekly","monthly"] },
+                "environment":     { "$ref": "#/$defs/Slug" }
+              } } },
+        "synthetic_checks": { "type": "array", "items": { "type": "object",
+              "required": ["id","kind","target","interval","on_fail_severity"],
+              "additionalProperties": false,
+              "properties": {
+                "id":                  { "$ref": "#/$defs/Slug" },
+                "kind":                { "type": "string", "enum": ["elastic-synthetics","blackbox-exporter","checkly","k6","grafana-synthetics"] },
+                "target":              { "type": "string" },
+                "interval":            { "$ref": "#/$defs/Duration" },
+                "otel_instrumentation":{ "type": "boolean" },
+                "assertions":          { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+                "on_fail_severity":    { "$ref": "#/$defs/Severity" }
+              } } }
+      }
+    },
+
+    "Telemetry": {
+      "type": "object",
+      "required": ["backends"],
+      "additionalProperties": false,
+      "properties": {
+        "backends": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Backend" } }
+      }
+    },
+
+    "Environments": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/Slug" },
+      "additionalProperties": { "$ref": "#/$defs/Environment" }
+    },
+
+    "Environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target":        { "$ref": "#/$defs/Target" },
+        "criticality":   { "$ref": "#/$defs/Criticality" },
+        "backends":      { "type": "object", "additionalProperties": { "$ref": "#/$defs/BackendRef" } },
+        "overrides":     { "type": "object", "additionalProperties": true },
+        "suppress":      { "type": "array", "items": { "type": "string", "enum": ["maintenance_windows","deploy_freezes","dependency_outage"] } },
+        "promote_after": { "$ref": "#/$defs/Duration" }
+      }
+    },
+
+    "Profiling": {
+      "type": "object",
+      "required": ["backend"],
+      "additionalProperties": false,
+      "properties": {
+        "backend":       { "$ref": "#/$defs/BackendRef" },
+        "product":       { "$ref": "#/$defs/Product" },
+        "version":       { "$ref": "#/$defs/VersionSpec" },
+        "profile_types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Network": {
+      "type": "object",
+      "required": ["backend"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "$ref": "#/$defs/BackendRef" },
+        "product": { "$ref": "#/$defs/Product" },
+        "version": { "$ref": "#/$defs/VersionSpec" },
+        "observe": { "type": "array", "items": { "type": "string", "enum": ["endpoints","identities","policy","services","nodes","flows"] } }
+      }
+    },
+
+    "PolicyEngine": {
+      "type": "object",
+      "required": ["backend"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "$ref": "#/$defs/BackendRef" },
+        "product": { "$ref": "#/$defs/Product" },
+        "version": { "$ref": "#/$defs/VersionSpec" },
+        "bundles": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "MeshComponent": {
+      "type": "object",
+      "required": ["product"],
+      "additionalProperties": false,
+      "properties": {
+        "product": { "$ref": "#/$defs/Product" },
+        "role":    { "type": "string", "enum": ["proxy","gateway","service-discovery","ingress"] },
+        "backend": { "$ref": "#/$defs/BackendRef" },
+        "version": { "$ref": "#/$defs/VersionSpec" }
+      }
+    },
+
+    "CollectionComponent": {
+      "type": "object",
+      "required": ["product"],
+      "additionalProperties": false,
+      "properties": {
+        "product": { "$ref": "#/$defs/Product" },
+        "role":    { "type": "string", "enum": ["agent","aggregator","forwarder"] },
+        "backend": { "$ref": "#/$defs/BackendRef" },
+        "version": { "$ref": "#/$defs/VersionSpec" }
+      }
+    }
+  }
+}

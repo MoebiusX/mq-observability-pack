@@ -1,0 +1,273 @@
+# mq-observability-pack — self-contained IBM MQ observability lab.
+#
+#   docker compose up -d --build --wait      # bring up MQ + telemetry stack + canary
+#   npm run certify                          # conformance + synthetic + chaos → reports/
+#   docker compose down -v                   # tear down incl. volumes
+#
+# Every host port is bound to loopback. Port block: 127.0.0.1:2xxxx so it never
+# collides with Observogram's validation stacks (13xxx / 1xxxx).
+#
+# Two MQ metric sources on purpose:
+#   * the queue manager's NATIVE endpoint (mq:9157, MQ_ENABLE_METRICS=true) — qmgr-level only,
+#     survives listener/channel faults → tells "process alive"
+#   * mq_prometheus (ibm-messaging/mq-metric-samples) as an MQ CLIENT — queue/channel level,
+#     dies with the listener/SVRCONN → tells "reachable by applications"
+#   The difference between the two is the differential diagnosis the pack alerts on.
+
+name: mq-obs
+
+x-loki-otlp: &loki_otlp http://loki:3100/otlp
+
+services:
+
+  # ---------------------------------------------------------------- IBM MQ
+  mq:
+    image: icr.io/ibm-messaging/mq:${MQ_IMAGE_TAG:-10.0.0.5-r1}
+    hostname: mq
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: ${MQ_QMGR_NAME:-QM1}
+      MQ_ENABLE_METRICS: "true"
+      MQ_LOGGING_CONSOLE_FORMAT: json
+      MQ_LOGGING_CONSOLE_SOURCE: qmgr,web
+      MQ_ENABLE_EMBEDDED_WEB_SERVER: "true"
+      # Deprecated since 9.4 but still honoured on 9.4.x; 10.0 prefers the secrets below.
+      MQ_ADMIN_PASSWORD: ${MQ_ADMIN_PASSWORD:-passw0rd}
+      MQ_APP_PASSWORD: ${MQ_APP_PASSWORD:-passw0rd}
+    secrets:
+      - mqAdminPassword
+      - mqAppPassword
+    ports:
+      - "127.0.0.1:21414:1414"   # MQ listener
+      - "127.0.0.1:29443:9443"   # web console / REST (https, admin / passw0rd)
+      - "127.0.0.1:29157:9157"   # native qmgr metrics
+    volumes:
+      - qmdata:/mnt/mqm
+      - ./stack/mq/20-observability.mqsc:/etc/mqm/20-observability.mqsc:ro
+    ulimits:
+      nofile: { soft: 10240, hard: 10240 }
+    healthcheck:
+      test: ["CMD", "chkmqhealthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # ------------------------------------------------- mq_prometheus exporter
+  # Built straight from the IBM repo at a pinned tag (v6.0.0, Jun 2026).
+  # Connects as an MQ client over DEV.ADMIN.SVRCONN so it sees exactly what
+  # an application sees: if the listener is down, so is this exporter.
+  mq-exporter:
+    build:
+      context: https://github.com/ibm-messaging/mq-metric-samples.git#v6.0.0
+      dockerfile: Dockerfile
+      args:
+        EXPORTER: mq_prometheus
+    image: mq-obs/mq_prometheus:v6.0.0
+    environment:
+      IBMMQ_CONNECTION_QUEUEMANAGER: ${MQ_QMGR_NAME:-QM1}
+      IBMMQ_CONNECTION_USER: admin
+      IBMMQ_CONNECTION_PASSWORDFILE: /run/secrets/mqAdminPassword
+      IBMMQ_GLOBAL_LOGLEVEL: INFO
+    secrets:
+      - mqAdminPassword
+    volumes:
+      - ./stack/mq-exporter/mq_prometheus.yaml:/opt/config/mq_prometheus.yaml:ro
+    ports:
+      - "127.0.0.1:29158:9157"
+    depends_on:
+      mq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # -------------------------------------------------------- OTel Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:${OTELCOL_TAG:-0.161.0}
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0"                     # needs to read docker json logs
+    environment:
+      ENV: ${ENV:-lab}
+      MQ_QMGR_NAME: ${MQ_QMGR_NAME:-QM1}
+    volumes:
+      - ./stack/otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - otelcol-state:/var/lib/otelcol
+    ports:
+      - "127.0.0.1:24317:4317"   # OTLP gRPC
+      - "127.0.0.1:24318:4318"   # OTLP HTTP
+      - "127.0.0.1:28888:8888"   # collector self-metrics
+      - "127.0.0.1:23133:13133"  # health_check
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--version"]   # scratch-ish image; liveness only
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------------------------------------------ Prometheus
+  prometheus:
+    image: prom/prometheus:${PROM_TAG:-v3.14.0}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-remote-write-receiver
+      - --web.enable-lifecycle
+    volumes:
+      - ./stack/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./stack/prometheus/rules:/etc/prometheus/rules:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:29090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/ready"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  alertmanager:
+    image: prom/alertmanager:${AM_TAG:-v0.34.0}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./stack/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:29093:9093"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9093/-/ready"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  # Receives Alertmanager webhooks and keeps a timestamped ledger the harness
+  # reads back to compute MTTD (alert fired − fault injected).
+  alert-sink:
+    build: ./harness/alert-sink
+    image: mq-obs/alert-sink:local
+    ports:
+      - "127.0.0.1:29095:9095"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9095/healthz"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  # ------------------------------------------------------------------ Loki
+  loki:
+    image: grafana/loki:${LOKI_TAG:-3.7.7}
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./stack/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    ports:
+      - "127.0.0.1:23100:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  # ---------------------------------------------------------------- Jaeger
+  jaeger:
+    image: jaegertracing/jaeger:${JAEGER_TAG:-2.21.0}
+    ports:
+      - "127.0.0.1:26686:16686"  # UI + /api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:16686/"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  # --------------------------------------------------------------- Grafana
+  grafana:
+    image: grafana/grafana:${GRAFANA_TAG:-12.4.11}
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+    volumes:
+      - ./stack/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./stack/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:23000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 45
+
+  # ---------------------------------------------------------------- Canary
+  # Node + ibmmq (MQI) + OTel SDK. Same image, three roles.
+  canary:
+    build: ./canary
+    image: mq-obs/canary:local
+    environment: &canary_env
+      MODE: canary
+      MQ_QMGR: ${MQ_QMGR_NAME:-QM1}
+      MQ_CONNAME: mq(1414)
+      MQ_CHANNEL: DEV.APP.SVRCONN
+      MQ_USER: app
+      MQ_PASSWORD_FILE: /run/secrets/mqAppPassword
+      CANARY_QUEUE: APP.CANARY
+      ORDERS_QUEUE: APP.ORDERS.REQ
+      INTERVAL_MS: "10000"
+      OTEL_SERVICE_NAME: mq-canary
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=ibmmq,deployment.environment=${ENV:-lab},service.version=0.1.0
+    secrets:
+      - mqAppPassword
+    depends_on:
+      mq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  producer:
+    image: mq-obs/canary:local
+    environment:
+      <<: *canary_env
+      MODE: producer
+      OTEL_SERVICE_NAME: orders-producer
+      RATE_PER_SEC: "${PRODUCER_RATE:-5}"
+    secrets:
+      - mqAppPassword
+    depends_on:
+      canary:
+        condition: service_started
+    restart: unless-stopped
+
+  consumer:
+    image: mq-obs/canary:local
+    environment:
+      <<: *canary_env
+      MODE: consumer
+      OTEL_SERVICE_NAME: orders-consumer
+    secrets:
+      - mqAppPassword
+    depends_on:
+      canary:
+        condition: service_started
+    restart: unless-stopped
+
+secrets:
+  mqAdminPassword:
+    file: ./stack/mq/secrets/mqAdminPassword
+  mqAppPassword:
+    file: ./stack/mq/secrets/mqAppPassword
+
+volumes:
+  qmdata:
+  promdata:
+  lokidata:
+  otelcol-state:

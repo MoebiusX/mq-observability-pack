@@ -1,0 +1,21 @@
+# Alertmanager — routes every pack alert to the harness alert-sink (webhook ledger).
+# Production routing (MS Teams / PagerDuty) is declared in packs/ibmmq.pack.yaml spec.alerting.
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: alert-sink
+  group_by: [alertname, qmgr, queue]
+  group_wait: 5s          # lab: minimal damping so MTTD reflects the pipeline
+  group_interval: 10s
+  repeat_interval: 1h
+  routes:
+    - matchers: [ severity = SEV1 ]
+      receiver: alert-sink
+      group_wait: 2s
+
+receivers:
+  - name: alert-sink
+    webhook_configs:
+      - url: http://alert-sink:9095/webhook
+        send_resolved: true
