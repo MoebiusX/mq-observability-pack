@@ -11,7 +11,7 @@ const ORDERS_QUEUE = process.env.ORDERS_QUEUE || 'APP.ORDERS.REQ';
 const INTERVAL_MS = Number(process.env.INTERVAL_MS || 10000);
 const RATE_PER_SEC = Number(process.env.RATE_PER_SEC || 5);
 const CANARY_EXPIRY_TENTHS = Number(process.env.CANARY_EXPIRY_TENTHS || 300);          // 30 s: a probe's message never outlives the next few probes
-const CONSUMER_RECYCLE_EVERY = Number(process.env.CONSUMER_RECYCLE_EVERY || 5000);     // messages per MQ connection (see Session.recycle)
+const CONSUMER_RECYCLE_EVERY = Number(process.env.CONSUMER_RECYCLE_EVERY || 0);        // messages per MQ connection, 0 = never (see Session.recycle)
 const { SpanKind, SpanStatusCode } = api;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -59,9 +59,10 @@ class Session {
     this.hObj = null; this.hConn = null;
   }
   /**
-   * Bounded connection lifetime. The ibmmq binding caches per-connection message handles
-   * (released only at MQDISC) and the consumer's resident memory was measured growing ~1 KB
-   * per GET; reconnecting every N messages caps whatever accumulates per conversation.
+   * Optional bounded connection lifetime (CONSUMER_RECYCLE_EVERY). Measured 2026-09-16 against
+   * the consumer's ~1 KB-per-GET native heap growth: reconnecting every 1000 messages released
+   * nothing (the growth is process-wide, mostly in the ibmmq module's per-GET OTel path), so it
+   * is off by default; the compose mem_limit + restart policy bound the process instead.
    */
   async recycle(every) {
     this.uses += 1;

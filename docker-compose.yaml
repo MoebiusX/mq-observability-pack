@@ -196,7 +196,8 @@ services:
       - "127.0.0.1:23100:3100"
     # No compose healthcheck: grafana/loki 3.x is a distroless image (no sh, wget or curl
     # to exec, so any CMD probe fails and the service is reported unhealthy forever).
-    # Readiness is probed by the harness (C1 → /ready); Loki needs ~15-30 s after start.
+    # Readiness is probed by the harness (C1 → /ready); Loki needs ~5 min to answer /ready on
+    # this single-binary config (measured; ~1 min when its volume already has data). C1 waits 6 min.
 
   # ----------------------------------------------------------------- Tempo
   # Grafana Tempo is the lab's trace store (and the pack's declared production one).
@@ -291,9 +292,10 @@ services:
       <<: *canary_env
       MODE: consumer
       OTEL_SERVICE_NAME: orders-consumer
-      # Reconnect every N messages (~3.5 min at 5 msg/s): the consumer's native heap grew
-      # ~1 KB per GET (measured 2026-09-16), and a bounded connection lifetime caps it.
-      CONSUMER_RECYCLE_EVERY: "1000"
+      # The consumer's native heap grows ~1 KB per GET (measured 2026-09-16; ~0.4 KB with the
+      # ibmmq module's OTel hook off; reconnecting every 1000 messages released nothing). Until
+      # the client library is fixed, mem_limit + restart above bound it: at 5 msg/s the
+      # container recycles itself roughly daily instead of exhausting the host.
     secrets:
       - mqAppPassword
     depends_on:
