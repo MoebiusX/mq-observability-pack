@@ -295,12 +295,14 @@ spec:
         attributes:
           - { key: mq.qmgr.name,           value: "${MQ_QMGR_NAME}", action: upsert }
           - { key: deployment.environment, value: "${ENV}",          action: upsert }
+      # service identity (ibmmq / mq-canary / orders-*) is set per entry in the filelog
+      # receiver (stanza resource fields); OTTL only promotes record-level fields
       - name: transform
         log_statements:
           - context: log
             statements:
-              - set(resource.attributes["service.name"], "ibmmq") where attributes["mq"]["ibm_messageId"] != nil
               - set(attributes["mq.message_id"], attributes["mq"]["ibm_messageId"]) where attributes["mq"]["ibm_messageId"] != nil
+              - set(trace_id.string, attributes["app"]["trace_id"]) where attributes["app"]["trace_id"] != nil
 
     exporters:
       metrics:
