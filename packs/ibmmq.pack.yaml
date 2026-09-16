@@ -193,7 +193,7 @@ spec:
       query: |
         max by (qmgr, queue) (
           last_over_time(ibmmq_queue_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
-            / ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}
+            / last_over_time(ibmmq_queue_attribute_max_depth{job="ibmmq-exporter", queue=~"APP.*"}[30s])
         )
       threshold: 0.8
       unit: ratio
@@ -239,7 +239,7 @@ spec:
       semconv_metric: mq.canary.roundtrip.duration
       query: |
         histogram_quantile(0.99,
-          sum by (le) (rate(mq_canary_roundtrip_duration_seconds_bucket[5m])))
+          sum by (le) (rate(mq_canary_roundtrip_duration_seconds_bucket{result="ok"}[5m])))
       threshold: 0.5
       unit: seconds
 

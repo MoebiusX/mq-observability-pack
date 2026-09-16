@@ -19,10 +19,14 @@ groups:
           description: "The queue manager's native metrics endpoint (:9157) is not answering. The container or qmgr process is gone."
           runbook: runbooks/qmgr-down.md
 
+      # on (qmgr): both sides carry the qmgr label; `on ()` would let QM1's native endpoint
+      # vouch for a dead QM2. min_over_time(...[1m]) == 1: the native endpoint must have been
+      # up for a full minute, so the 10-20 s the exporter needs to reconnect after a qmgr
+      # restart (status 0 while native is already 1) does not page "listener fault".
       - alert: IBMMQQueueManagerUnreachable
         expr: |
           (ibmmq_qmgr_status{job="ibmmq-exporter"} != 2)
-            and on () (up{job="ibmmq-native"} == 1)
+            and on (qmgr) (min_over_time(up{job="ibmmq-native"}[1m]) == 1)
         for: 20s
         labels: { severity: SEV1, pack: ibmmq, sli: qmgr_reachability }
         annotations:
@@ -30,13 +34,30 @@ groups:
           description: "Native metrics answer but the client-side exporter cannot connect (status={{ $value }}). Listener, SVRCONN channel, CHLAUTH or CONNAUTH fault."
           runbook: runbooks/qmgr-unreachable.md
 
+      # keep_firing_for: during a queue-manager outage mq_prometheus (keepRunning) answers about
+      # one scrape in five while it retries, so up{} toggles and this alert fired → resolved →
+      # re-pended every ~50 s (6 false "resolved" webhooks over 3 qmgr-down runs, measured).
       - alert: IBMMQExporterDown
         expr: up{job="ibmmq-exporter"} == 0
         for: 30s
+        keep_firing_for: 1m
         labels: { severity: SEV2, pack: ibmmq, sli: qmgr_reachability }
         annotations:
           summary: "mq_prometheus exporter is not being scraped"
           description: "Queue/channel-level telemetry is blind. Everything below this line is unobservable until it recovers."
+
+      # The whole differential diagnosis rests on up{} series that only exist while the OTel
+      # Collector remote-writes them. If the collector dies, every selector above is EMPTY, not
+      # 0, and nothing fires; the first symptom would be MQCanaryFailing's absent() five minutes
+      # later, blaming the canary. This names the real fault.
+      - alert: IBMMQTelemetryPipelineDown
+        expr: absent_over_time(up{job="ibmmq-native"}[1m])
+        for: 30s
+        labels: { severity: SEV1, pack: ibmmq, sli: qmgr_process_up }
+        annotations:
+          summary: "No MQ telemetry has reached Prometheus for over a minute"
+          description: "up{job=\"ibmmq-native\"} has no samples: the OTel Collector (or its scrape of the queue manager) is down. Every MQ alert is blind until it recovers."
+          runbook: runbooks/telemetry-pipeline.md
 
       # ---- queues ---------------------------------------------------------------
       - alert: IBMMQQueueDepthHigh
@@ -80,6 +101,10 @@ groups:
       # Detection ≈ 40 s + ingest lag (~4 s) + `for` 10 s + eval + group_wait ≈ 60-70 s.
       # `or vector(0)` covers the case where no result="ok" series exists at all. Experiments
       # that expect this alert budget 90 s (pack expected_mttd).
+      # Third branch: a canary blocked inside MQCONN/MQPUT keeps exporting a FLAT counter every
+      # 5 s, so neither "ok == 0 while attempts > 0" nor absent() is true; "no attempt of any
+      # kind completed in 2 min" catches the hung probe (a fresh single-sample series yields an
+      # empty increase(), so a restart cannot false-fire it).
       - alert: MQCanaryFailing
         expr: |
           (
@@ -87,11 +112,12 @@ groups:
               and sum(increase(mq_canary_attempts_total[40s])) > 0
           )
             or absent(mq_canary_attempts_total)
+            or (sum(increase(mq_canary_attempts_total[2m])) == 0)
         for: 10s
         labels: { severity: SEV1, pack: ibmmq, sli: canary_success }
         annotations:
           summary: "Synthetic put/get canary is failing"
-          description: "No canary round-trip has succeeded in the last 40 s although probes continue (or the canary is silent)."
+          description: "No canary round-trip has succeeded in the last 40 s although probes continue, the canary is silent, or no probe has completed at all in 2 min (hung inside an MQI call)."
           runbook: runbooks/canary.md
 
       - alert: MQCanaryLatencyHigh

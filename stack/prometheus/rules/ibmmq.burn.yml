@@ -510,7 +510,7 @@ groups:
         expr: "predict_linear(ibmmq:errorbudget:burn_1h{slo=\"queue_headroom_99_9\"}[1d], 86400) > 1 and min_over_time(ibmmq:errorbudget:burn_1h{slo=\"queue_headroom_99_9\"}[2h]) > 1"
         for: 15m
         labels:
-          severity: SEV3
+          severity: SEV1
           pack: ibmmq
           slo: queue_headroom_99_9
           sli: queue_depth_headroom
@@ -520,12 +520,13 @@ groups:
           summary: "queue_headroom_99_9 has burned faster than its budget for 2h and the trend projects a breach"
           method: "linear on the 1h burn rate (pack declares linear; the lab implements linear only)"
           horizon: 1d
+          horizon_declared: 1d
           on_projected_breach: page_oncall
       - alert: qmgr_process_up_99_9_forecast_breach
         expr: "predict_linear(ibmmq:errorbudget:burn_1h{slo=\"qmgr_process_up_99_9\"}[1d], 86400) > 1 and min_over_time(ibmmq:errorbudget:burn_1h{slo=\"qmgr_process_up_99_9\"}[2h]) > 1"
         for: 15m
         labels:
-          severity: SEV3
+          severity: SEV2
           pack: ibmmq
           slo: qmgr_process_up_99_9
           sli: qmgr_process_up
@@ -534,7 +535,8 @@ groups:
         annotations:
           summary: "qmgr_process_up_99_9 has burned faster than its budget for 2h and the trend projects a breach"
           method: "linear on the 1h burn rate (pack declares holt-winters; the lab implements linear only)"
-          horizon: 7d
+          horizon: "1d evaluated (pack declares 7d; capped at the 1d regression window, deviation 5)"
+          horizon_declared: 7d
           on_projected_breach: open_ticket
       - alert: message_age_99_under_60s_forecast_breach
         expr: "predict_linear(ibmmq:errorbudget:burn_1h{slo=\"message_age_99_under_60s\"}[1d], 86400) > 1 and min_over_time(ibmmq:errorbudget:burn_1h{slo=\"message_age_99_under_60s\"}[2h]) > 1"
@@ -549,5 +551,6 @@ groups:
         annotations:
           summary: "message_age_99_under_60s has burned faster than its budget for 2h and the trend projects a breach"
           method: "linear on the 1h burn rate (pack declares percentile-of-history; the lab implements linear only)"
-          horizon: 3d
+          horizon: "1d evaluated (pack declares 3d; capped at the 1d regression window, deviation 5)"
+          horizon_declared: 3d
           on_projected_breach: post_warning

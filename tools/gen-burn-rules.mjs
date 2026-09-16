@@ -28,6 +28,9 @@
 //   3. Forecast alerts regress the recorded 1 h burn rate over 1 d and require it to have been
 //      above 1× for 2 h; the compiler's predict_linear on the 5 m error ratio fired ~15 min after
 //      every transient outage (measured: 28 min of "breach within 7 d" after a 2 min stop).
+//   5. The forecast horizon is capped at the 1 d regression window (a 7 d extrapolation of a
+//      1 d slope is 7× more sensitive); the annotation says which horizon was evaluated and the
+//      severity follows on_projected_breach (page_oncall → SEV1, open_ticket → SEV2, else SEV3).
 //      Every pack forecast method is implemented as this linear rule in the lab.
 //   4. `for:` is lab-tuned (30 s / 2 m / 5 m by short window); the compiler uses 2 m / 5 m / 10 m.
 //
@@ -44,6 +47,7 @@ const OUT = 'stack/prometheus/rules/ibmmq.burn.yml';
 const STEP_SEC = 10;                      // scrape interval = canary probe interval = subquery step
 const SUBQ = `${STEP_SEC}s`;
 const MIN_BAD_SAMPLES = 2;                // deviation 2
+const FORECAST_SEVERITY = { page_oncall: 'SEV1', open_ticket: 'SEV2', post_warning: 'SEV3' };   // deviation 5
 const pack = parseYaml(readFileSync(resolve(root, PACK), 'utf8'));
 const svc = pack.metadata.name;           // "ibmmq"
 const slis = Object.fromEntries(pack.spec.slis.map(s => [s.id, s]));
@@ -164,17 +168,25 @@ for (const f of pack.spec.policy.forecasts || []) {
   const slo = slos[f.slo];
   if (!slo) throw new Error(`forecast references unknown SLO ${f.slo}`);
   const burn = `${svc}:errorbudget:burn_1h{slo="${slo.id}"}`;
-  const horizon = Math.min(durationSeconds(f.horizon || '7d'), 86400);
+  // Deviation 5: the projection horizon is capped at the regression window (1 d). Extrapolating
+  // a 1 d regression 7 d out multiplies the slope by 7 and turned every post-incident tail into
+  // a "breach within 7 d"; the annotation states the horizon actually evaluated.
+  const declared = f.horizon || '7d';
+  const horizon = Math.min(durationSeconds(declared), 86400);
+  const action = f.on_projected_breach || 'open_ticket';
   forecasts.push({
     alert: `${slo.id}_forecast_breach`,
     expr: `predict_linear(${burn}[1d], ${horizon}) > 1 and min_over_time(${burn}[2h]) > 1`,
     for: '15m',
-    labels: { severity: 'SEV3', pack: svc, slo: slo.id, sli: slo.sli, service: svc, kind: 'forecast' },
+    // severity follows the pack's on_projected_breach: routing is by severity only, so a
+    // page_oncall forecast emitted as SEV3 would land in the team channel, never on a pager.
+    labels: { severity: FORECAST_SEVERITY[action] || 'SEV3', pack: svc, slo: slo.id, sli: slo.sli, service: svc, kind: 'forecast' },
     annotations: {
       summary: `${slo.id} has burned faster than its budget for 2h and the trend projects a breach`,
       method: `linear on the 1h burn rate (pack declares ${f.method || 'linear'}; the lab implements linear only)`,
-      horizon: String(f.horizon || '7d'),
-      on_projected_breach: f.on_projected_breach || 'open_ticket',
+      horizon: horizon === durationSeconds(declared) ? String(declared) : `${horizon / 86400}d evaluated (pack declares ${declared}; capped at the 1d regression window, deviation 5)`,
+      horizon_declared: String(declared),
+      on_projected_breach: action,
     },
   });
 }
