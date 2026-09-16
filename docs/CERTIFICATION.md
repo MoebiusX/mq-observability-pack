@@ -15,5 +15,5 @@ Bar = measured MTTD (webhook receipt − injection). Tick = pack target. A late 
 ## Reproducibility
 Every image is pinned; the exporter is built from a tagged IBM source revision; the harness is dependency-free. Run twice on the same machine and the conformance/synthetic sections are deterministic; chaos MTTDs vary by ±10 s (scrape/poll/evaluation phase alignment).
 
-## Scope boundaries (v0.1)
+## Scope boundaries (v0.2)
 Single queue manager, no TLS, dev credentials, docker-level faults only. Not covered yet: Native HA / uniform cluster failover, channel-level chaos between queue managers, disk-latency injection for `log_write_latency`, JMS clients. Each is a pack `chaos_experiments` entry away and the harness `faults` map is the only code to extend.

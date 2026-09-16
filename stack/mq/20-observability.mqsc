@@ -36,5 +36,5 @@ ALTER TOPIC('SYSTEM.ADMIN.TOPIC') USEDLQ(NO)
 
 * --- Listener: the image creates the qmgr with `crtmqm -p 1414`, i.e. SYSTEM.LISTENER.TCP.1
 * CONTROL(QMGR). Chaos scenario `listener-stopped` uses STOP/START LISTENER on that name plus
-* STOP CHANNEL(...) MODE(FORCE) on both DEV.*.SVRCONN channels: stopping the listener alone
+* STOP CHANNEL(...) MODE(FORCE) on DEV.APP.SVRCONN and DEV.ADMIN.SVRCONN: stopping the listener alone
 * leaves established client conversations working.

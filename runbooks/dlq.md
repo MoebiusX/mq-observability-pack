@@ -14,6 +14,6 @@
 * Discard (`ACTION(DISCARD)`) only with written business sign-off; on a payments queue manager a DLQ message may be money.
 
 ## Verify
-DLQ depth 0; alert resolves after 20 s.
+DLQ depth 0; the alert resolves 30-50 s after the queue is empty (measured; its `for:` is 20 s).
 
 No automation exists for this alert by design (`automation: manual-only` in the pack).

@@ -55,7 +55,7 @@ const norm = (s) => String(s ?? '').replace(/\s+/g, '').trim();
 const rkey = (name, l, expr) => `${name}|${l?.slo}|${l?.sli}|${l?.service}|${norm(expr)}`;
 const stackSlo = new Set(rules.filter(x => x.record && x.labels?.slo).map(x => rkey(x.record, x.labels, x.expr)));
 const packSlo = new Set(pack.spec.queries.recording_rules.filter(r => r.labels?.slo).map(r => rkey(r.name, r.labels, r.expr)));
-for (const k of packSlo) if (!stackSlo.has(k)) { bad++; const [n, s] = k.split('|'); console.error(`✗ recording rule ${n}{slo="${s}"}: pack entry has no identical stack rule (regenerate: npm run burn-rules --pack-snippet)`); }
+for (const k of packSlo) if (!stackSlo.has(k)) { bad++; const [n, s] = k.split('|'); console.error(`✗ recording rule ${n}{slo="${s}"}: pack entry has no identical stack rule (regenerate: node tools/gen-burn-rules.mjs --pack-snippet)`); }
 for (const k of stackSlo) if (!packSlo.has(k)) { bad++; const [n, s] = k.split('|'); console.error(`✗ recording rule ${n}{slo="${s}"}: stack rule missing from the pack (paste tools/gen-burn-rules.mjs --pack-snippet)`); }
 const selectors = (e) => [...String(e).matchAll(/[a-zA-Z_:][a-zA-Z0-9_:]*\{[^}]*\}/g)].map(m => norm(m[0])).sort().join(' ');
 let refResolved = 0;

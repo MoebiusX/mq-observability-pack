@@ -16,7 +16,7 @@ live on 2026-09-16 (see STATUS.md for the run and what it took).
 
 Static (no Docker; this is what CI runs):
 ```
-npm test                        # node --check on 3 entrypoints + pack schema validation (there are no unit tests)
+npm test                        # node --check on 4 entrypoints + pack schema validation (alert unit tests: promtool, below)
 node tools/check-rules.mjs      # pack <-> rules <-> dashboards cross-check
 npm run validate                # validate-pack + docker compose config + check-rules
 npm run generate                # regenerate dashboards + stack/prometheus/rules/ibmmq.burn.yml from the pack; CI fails on a non-empty git diff
@@ -29,23 +29,32 @@ promtool / otelcol-contrib / amtool are not npm deps; CI downloads pinned versio
 stack must be up for `exec`):
 ```
 MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -T otel-collector validate --config=/etc/otelcol/config.yaml
-MSYS_NO_PATHCONV=1 docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/ibmmq.recording.yml /etc/prometheus/rules/ibmmq.alerts.yml
+MSYS_NO_PATHCONV=1 docker compose exec -T prometheus promtool check rules /etc/prometheus/rules/ibmmq.recording.yml /etc/prometheus/rules/ibmmq.alerts.yml /etc/prometheus/rules/ibmmq.burn.yml   # all three: no glob inside exec
+MSYS_NO_PATHCONV=1 docker run --rm -v "C:/path/to/repo/stack/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.14.0 test rules /p/tests/ibmmq.alerts.test.yml
 ```
+`stack/prometheus/tests/*.yml` are promtool unit tests for the alerts whose behaviour was
+once wrong live (exporter-down flapping, the two-qmgr join, pipeline-down, hung canary); CI
+runs them, add a case whenever an alert expression changes.
 `MSYS_NO_PATHCONV=1` matters in Git Bash on Windows: without it `/etc/...` arguments
 are rewritten to `C:/Program Files/Git/etc/...` before docker sees them.
 
 Live stack and harness:
 ```
 npm run up | down | ps | logs   # up = docker compose up -d --build --wait (~5 min cold on Windows); down removes volumes
-npm run certify                 # settle 90 s, then conformance + synthetic + all chaos experiments (~25 min)
-npm run certify:quick           # --skip-chaos (~1-2 min)
-node harness/run.mjs --only conformance                      # one suite: conformance | synthetic | chaos
+npm run certify                 # settle 90 s, then conformance + synthetic + all chaos experiments (~15 min) → reports/
+npm run certify:quick           # --skip-chaos (~1-2 min) → reports/quick/ (never overwrites a full run's report)
+node harness/run.mjs --only conformance                      # one suite: conformance | synthetic | chaos (unknown names exit 3)
 node harness/run.mjs --only chaos --scenario queue-full,dlq-poison
 node harness/run.mjs --settle 120 --out /tmp/run1            # wait before first check; alternate report dir
+node harness/run.mjs --recover  # repair a lab left in a fault state (listener, channels, consumer, APP.BURST, DLQ)
 npm run mqsc                    # runmqsc QM1 inside the container (local bindings, works with listener stopped)
 curl http://127.0.0.1:29095/events   # alert-sink webhook ledger; DELETE /events clears it
 ```
-Harness exit code: 0 PASS, 1 WARN, 2 FAIL. Endpoints default to 127.0.0.1:2xxxx and
+Harness exit code: 0 PASS, 1 WARN, 2 FAIL, 3 the harness itself failed (bad flags, missing
+pack, crash: a partial report with verdict ERROR is written). A requested suite that produces
+no checks is FAIL, a SKIP is WARN. The chaos suite refuses to inject on a lab that still shows
+a previous fault (pre-flight) and recovers the in-flight experiment on Ctrl-C; a SIGKILL (tool
+timeout) cannot be caught, which is what `--recover` is for. Endpoints default to 127.0.0.1:2xxxx and
 are overridable with `PROM_URL AM_URL SINK_URL LOKI_URL TEMPO_URL GRAFANA_URL
 OTELCOL_URL GRAFANA_AUTH`; `PACK` picks another pack file, `COMPOSE` another compose
 binary, `MQ_QMGR_NAME` another queue manager. Loki reports `/ready` only ~5 min after
@@ -97,6 +106,21 @@ alert-sink `receivedAt` minus an injection instant read from the sink's own cloc
 12.4's Jaeger datasource speaks only that API, so Explore and log→trace links were
 dead. Tempo is Grafana-native and the pack's declared production trace backend.
 
+**Alerts that exist because something was silent or noisy live.** `IBMMQTelemetryPipelineDown`
+(`absent_over_time(up{job="ibmmq-native"}[1m])`): if the collector dies every `up == 0`
+selector is empty, not zero, and nothing else fires. `IBMMQExporterDown` has
+`keep_firing_for: 1m` because mq_prometheus answers one scrape in five during a qmgr outage and
+the alert flapped. `IBMMQQueueManagerUnreachable` joins `on (qmgr)` and requires the native
+endpoint up for a full minute (no page during the exporter's reconnect after a restart).
+`MQCanaryFailing` has a third branch for a canary hung inside an MQI call (flat counter, series
+present). Log pipeline: every service logs with the compose project/service labels in the
+json-file envelope; filelog drops lines from any other project on the host, names unparsed
+lines after their container (never a synthetic `docker` service) and starts at the beginning
+of each file (offsets persist in the `otelcol-state` volume). `ALTER TOPIC('SYSTEM.ADMIN.TOPIC')
+USEDLQ(NO)`: `$SYS` publications an unscraped exporter cannot absorb are discarded, not
+dead-lettered (they once put ~4 msg/s on APP.DLQ). Line endings are forced LF by
+`.gitattributes` (a CRLF Dockerfile does not build).
+
 **Timing budget (why `for:` is 10-30 s).** 10 s scrape + 10 s exporter poll + 10 s rule
 eval + `for` + at most 5 s `group_wait` (2 s for SEV1) is roughly 55 s worst case
 against a 60 s `expected_mttd` (150 s for message age, which must accrue 60 s first, measured 100-118 s;
@@ -110,7 +134,9 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   every SLI reads exporter gauges through `last_over_time(...[30s])`.
 - The `$SYS` "count" elements (`ibmmq_queue_mqput_mqput1_count`, `ibmmq_queue_mqget_count`,
   …) are per-interval deltas, not counters: `overrideCType: false`, and rates are
-  `sum_over_time(x[2m]) / 120`, never `rate()`. `ibmmq_channel_messages` is cumulative.
+  `sum_over_time(x[2m]) / 120`, never `rate()`. `ibmmq_channel_messages`, `_bytes_sent` and
+  `_bytes_rcvd` are deltas too (raw samples 99/50/99/50 on a steady channel; `rate()` showed
+  half the real throughput), so the same estimator applies (`perSec()` in gen-dashboards).
 - The native endpoint's counters already end in `_total` (`ibmmq_qmgr_commit_total`,
   `ibmmq_qmgr_destructive_get_total`); the collector appends `_total` only to OTLP
   counters such as the canary's `mq_canary_attempts_total`.
@@ -132,7 +158,11 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   by conformance C7). `ibmmq-unified` is laid out by `flow()` (add panels in reading
   order, never by coordinates). After changing any dashboard run `npm run
   verify:dashboards` against the live stack: it executes every Prometheus/Loki/Tempo
-  target of every panel and lists the ones that error or return nothing.
+  target of every panel (instant and range), lists the ones that error or return nothing,
+  flags targets where only an `or vector(0)` fallback answers ("MASKED": the metric name
+  itself is unverified) and treats Loki streams carrying `__error__` as errors. It refuses
+  to run while a symptom alert is firing unless `--allow-firing` is given. Burn-rate stat
+  colours come from each SLO's policy factors (`burnThresholds()`), not a fixed 6×/14×.
 - Chaos: each `validation.chaos_experiments[].id` needs an entry in the `faults` map in
   `harness/checks/chaos.mjs` (inject + recover), otherwise it is SKIP.
   `fault.duration` is the hold time, `expected_mttd` the target, and
@@ -151,8 +181,14 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   1h/6h window WARN: those legitimately keep burning for hours after any incident).
   The generator's PromQL deviates from the compiler on purpose (header + evidence §8):
   error ratio = bad samples / expected samples (missing time counts as good), the short
-  window needs ≥ 2 bad samples, forecasts regress the 1h burn and need 2h above 1×. All
-  three were measured failures of the naive forms on this stack; do not "simplify" back.
+  window needs ≥ 2 bad samples, forecasts regress the 1h burn and need 2h above 1×, the
+  forecast horizon is capped at the 1 d regression window (the annotation says which horizon
+  was evaluated) and forecast severity follows `on_projected_breach`. All were measured
+  failures of the naive forms on this stack; do not "simplify" back.
+- check-rules resolves every `ref:slis.<id>` recording rule to the SLI's query (threshold) or
+  good/total selectors (ratio) and compares it with the stack rule: a stack edit that drifts
+  from the pack SLI fails there. Every alert rule must carry `severity/pack/sli` and an
+  existing `runbook:` file.
 - Conformance C6 has a hard-coded list of required metric families in
   `harness/checks/conformance.mjs`; changing which metrics an SLI depends on means
   updating that list too.
@@ -184,9 +220,15 @@ IBM's repo at the pinned tag inside its builder stage. Loki and Tempo images are
 distroless (no sh/wget): no compose healthchecks, the harness probes `/ready`.
 
 **Live-run gotchas.** Never leave a `docker compose run` container behind: a
-mq_prometheus instance nobody scrapes fills its temporary reply queues to MAXDEPTH and
-every further `$SYS` publication is dead-lettered (~40 per 10 s). A background command
-that ends with `tail` reports `tail`'s exit code, not the command's.
+mq_prometheus instance nobody scrapes fills its temporary reply queues to MAXDEPTH (its
+publications are now discarded rather than dead-lettered, but it still wastes the qmgr's
+time). A background command that ends with `tail` reports `tail`'s exit code, not the
+command's. A harness run killed by a tool timeout leaves its fault injected: run
+`node harness/run.mjs --recover` before anything else. Bind-mounted configs (Loki, Tempo,
+Alertmanager, the collector, Prometheus rules) are read at process start only, and compose
+does not recreate a container because a mounted file changed: after editing one,
+`docker compose restart <service>` (Prometheus rules: `curl -X POST :29090/-/reload`),
+otherwise you certify the old process.
 
 ## Adding things
 - **New alert**: rule in `stack/prometheus/rules/ibmmq.alerts.yml` with the three
@@ -205,12 +247,13 @@ that ends with `tail` reports `tail`'s exit code, not the command's.
 ## Validation before every push
 ```
 npm test && node tools/check-rules.mjs && docker compose config --quiet
-promtool check rules stack/prometheus/rules/*.yml
+promtool check rules stack/prometheus/rules/*.yml && promtool test rules stack/prometheus/tests/*.yml
 ENV=lab MQ_QMGR_NAME=QM1 otelcol-contrib validate --config stack/otelcol/config.yaml
 amtool check-config stack/alertmanager/alertmanager.yml
 npm run generate && git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
 ```
-Then, when the change touches anything under `stack/`, `canary/` or `harness/`:
+Then, when the change touches anything under `stack/`, `canary/` or `harness/`: restart or
+recreate the services whose files changed, `npm run verify:dashboards` for dashboard changes,
 `npm run certify:quick` against the live stack, and `npm run certify` for chaos changes.
 
 ## Where things are

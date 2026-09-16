@@ -8,7 +8,7 @@
 3. Poison message: the same message being got and backed out repeatedly → `ibmmq_queue_depth` flat, age rising, consumer errors in a loop. Check `BOTHRESH`/`BOQNAME` on the queue.
 
 ## Fix
-Restart/scale the consumer (automation `consumer-scale-out`, max 3×/h). For a poison message, move it to the DLQ / backout queue by hand, then handle per the DLQ runbook.
+Restart/scale the consumer (`docker compose restart consumer` here; the pack declares a `consumer-scale-out` automation with a max of 3×/h for the platform to implement — nothing in this lab enforces it). For a poison message, move it to the DLQ / backout queue by hand, then handle per the DLQ runbook.
 
 ## Verify
 `ibmmq:oldest_message_age:seconds_max` drops below 60; alert resolves.

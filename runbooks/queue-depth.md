@@ -1,6 +1,6 @@
 # IBMMQQueueDepthHigh (SEV2) / IBMMQQueueFull (SEV1)
 
-**Signal:** `depth / MAXDEPTH` > 0.8 (High) or ≥ 1 (Full → producers get MQRC_Q_FULL 2053 and the producer's `mq.orders.put.errors` counter climbs).
+**Signal:** `depth / MAXDEPTH` > 0.8 (High) or ≥ 1 (Full → producers get MQRC_Q_FULL 2053 and the producer's `mq_orders_put_errors_total` counter (OTel name `mq.orders.put.errors`) climbs).
 
 ## Triage
 1. Which queue? (label `queue`). Producer-side or consumer-side? `ibmmq_queue_input_handles == 0` → nobody is getting → consumer down. Input handles > 0 but `oldest_message_age` rising → consumer too slow.
@@ -8,7 +8,7 @@
 3. Upstream burst? Compare producer rate to baseline.
 
 ## Fix
-* Consumer down → restart consumer (`consumer-scale-out` automation, max 3×/h).
+* Consumer down → restart the consumer by hand (`docker compose restart consumer`); the `consumer-scale-out` automation and its 3×/h guardrail are declared in the pack for the platform, not implemented in this lab.
 * Consumer slow → scale out consumers; MQ shares a queue between concurrent getters natively.
 * Genuinely more load → `ALTER QLOCAL(x) MAXDEPTH(n)` buys time only; fix the consumer.
 * Never `CLEAR QLOCAL` on a persistent application queue without business sign-off.
