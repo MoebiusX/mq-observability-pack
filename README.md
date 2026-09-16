@@ -20,13 +20,16 @@ open reports/cert-report.html
 
 Prerequisites: Docker Desktop (or any Docker with Compose v2) and Node ≥ 20.19 on
 the host for the harness. Nothing else — the harness has zero npm dependencies.
+Windows hosts are supported: the exporter builds from `stack/mq-exporter/Dockerfile`
+(which clones IBM's repo at the pinned tag) because buildx bake cannot use a git-URL
+build context on Windows.
 
 ## What you get
 
 | Layer (pack) | Implementation | Where |
 |---|---|---|
 | L1 Contract — 8 SLIs, 8 SLOs | PromQL over `ibmmq_*` (mq_prometheus), `up{job="ibmmq-native"}`, `mq_canary_*` | `packs/ibmmq.pack.yaml` |
-| L2 Telemetry | OTel Collector 0.161 (prometheus + filelog + OTLP receivers → remote-write, Loki OTLP, Jaeger OTLP) | `stack/otelcol/config.yaml` |
+| L2 Telemetry | OTel Collector 0.161 (prometheus + filelog + OTLP receivers → remote-write, Loki OTLP, Tempo OTLP) | `stack/otelcol/config.yaml` |
 | L3 Insight | 13 recording rules, 2 provisioned Grafana dashboards bound to SLIs | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
 | L4 Action | 13 alert rules (SEV1-3), Alertmanager → webhook ledger, 5 runbooks with guardrails | `stack/prometheus/rules/ibmmq.alerts.yml`, `runbooks/` |
 | L5 Validation | canary + orders flow, 5 chaos experiments, MTTD/MTTR measurement, report | `canary/`, `harness/` |

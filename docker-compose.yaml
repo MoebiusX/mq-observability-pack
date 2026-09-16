@@ -54,15 +54,17 @@ services:
       start_period: 30s
 
   # ------------------------------------------------- mq_prometheus exporter
-  # Built straight from the IBM repo at a pinned tag (v6.0.0, Jun 2026).
+  # Built from IBM source at a pinned tag (v6.0.0, Jun 2026): stack/mq-exporter/Dockerfile
+  # clones the tag inside its builder stage. A remote git build context here breaks
+  # buildx bake on Windows (see that Dockerfile's header), so the context is local.
   # Connects as an MQ client over DEV.ADMIN.SVRCONN so it sees exactly what
   # an application sees: if the listener is down, so is this exporter.
   mq-exporter:
     build:
-      context: https://github.com/ibm-messaging/mq-metric-samples.git#v6.0.0
-      dockerfile: Dockerfile
+      context: ./stack/mq-exporter
       args:
         EXPORTER: mq_prometheus
+        MQ_METRIC_SAMPLES_TAG: v6.0.0
     image: mq-obs/mq_prometheus:v6.0.0
     environment:
       IBMMQ_CONNECTION_QUEUEMANAGER: ${MQ_QMGR_NAME:-QM1}
@@ -235,6 +237,7 @@ services:
 
   producer:
     image: mq-obs/canary:local
+    pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
       <<: *canary_env
       MODE: producer
@@ -249,6 +252,7 @@ services:
 
   consumer:
     image: mq-obs/canary:local
+    pull_policy: never            # image is built by the canary service; never ask a registry
     environment:
       <<: *canary_env
       MODE: consumer
