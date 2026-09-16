@@ -39,7 +39,8 @@ jobs:
           base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTELCOL_VERSION}
           f=otelcol-contrib_${OTELCOL_VERSION}_linux_amd64.tar.gz
           curl -sSLO ${base}/${f}
-          curl -sSL ${base}/${f}.sha256 | sha256sum -c -
+          # the collector's per-asset .sha256 is a bare hash (no filename, no newline)
+          echo "$(curl -sSL ${base}/${f}.sha256 | tr -d '\r\n ')  ${f}" | sha256sum -c -
           tar xzf ${f} otelcol-contrib
           ENV=lab MQ_QMGR_NAME=QM1 ./otelcol-contrib validate --config=stack/otelcol/config.yaml
       - name: amtool
