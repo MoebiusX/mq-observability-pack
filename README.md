@@ -18,6 +18,11 @@ npm run certify                         # settle 90s, conformance + synthetic + 
 open reports/cert-report.html
 ```
 
+How it all fits together, at four levels of detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+To make a queue manager you already run (installed on Linux, multi-instance, an RDQM group,
+a uniform cluster) produce the same telemetry so this pack applies to it:
+[`docs/INSTRUMENTING-EXISTING-MQ.md`](docs/INSTRUMENTING-EXISTING-MQ.md).
+
 Prerequisites: Docker Desktop (or any Docker with Compose v2) and Node ≥ 20.19 on
 the host for the harness. Nothing else — the harness has zero npm dependencies.
 Windows hosts are supported: the exporter builds from `stack/mq-exporter/Dockerfile`
@@ -139,7 +144,7 @@ stack/                         executable form: mq, mq-exporter, otelcol, promet
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
 tools/                         validate-pack, check-rules, gen-dashboards, gen-burn-rules (spec.policy → Prometheus alerts)
-docs/                          ARCHITECTURE, CERTIFICATION, catalogue-evidence/ (evidence trail + the live metric inventory), reviews/
+docs/                          ARCHITECTURE (four levels), INSTRUMENTING-EXISTING-MQ (existing queue managers, RDQM), CERTIFICATION, catalogue-evidence/ (evidence trail + the live metric inventory), reviews/
 runbooks/                      one per remediation trigger
 vendor/observogram/            pack schema + validator (lifted from Observogram)
 reports/                       generated certification reports (git-ignored)
