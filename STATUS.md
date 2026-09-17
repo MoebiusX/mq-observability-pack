@@ -1,5 +1,39 @@
 # STATUS
 
+## 2026-09-17 (early) — dashboards restyled and reorganised around the pack; MTTD/MTTR on the boards
+
+**Ask:** professional, premium-looking dashboards that show what matters (MTTD, MTTR, SLOs)
+clearly, organised by the pack's structure the way the Kafka reference pack is.
+
+**Done (`feat(dashboards)` + `feat(cert-metrics)`):**
+- Unified board now follows the pack's section order: §1-2 SLIs and SLOs (tiles with
+  sparklines, error-budget burn per SLO as a bar gauge coloured by that SLO's own policy
+  factors, fast/slow burn curves) → §10 validation (last certification verdict, when, MTTD
+  p50/p95 and MTTR p50/p95 against the pack baselines, every expected alert's detection time
+  against its `expected_mttd`, resolution after recovery, checks per suite; then the synthetic
+  canary/orders flow) → §7-8 policy and alerting (state timelines of pending/firing, firing
+  table with severity colouring) → §9 remediation (table generated from the pack: trigger,
+  runbook link, declared automation and guardrails) → signals (availability timeline, queues
+  with headroom bars, channels timeline, resource gauges) → §3-5 pipelines/storage/queries →
+  logs and traces. Header banner with cross-board links; rows without emoji; annotations only
+  for symptom alerts.
+- Visual system in the generator: one palette, value-coloured stats (solid tiles only for
+  states), smooth gradient lines with nulls bridged across exporter gaps, dashed SLO
+  threshold lines, table legends with last/max, semantic series colours. State timelines
+  need `color.mode: fixed` on Grafana 12 (thresholds mode ignored the mapping colours —
+  found with a side-by-side test dashboard, since deleted).
+- MTTD and MTTR as metrics: the harness POSTs each run's summary to the alert-sink
+  (`/results`), the sink exposes `mq_cert_*` at `/metrics`, the collector scrapes it as job
+  `certification` (pack `pipelines` updated), `node harness/run.mjs --publish <report>`
+  re-publishes after a sink restart. The report now also carries `mttr` quantiles.
+- Pack bindings moved from `description: "binds_to: …"` to a `pack.binds_to` array per
+  panel (check-rules reads both), so descriptions are human text shown on hover.
+
+**Verification:** check-rules green (4 dashboards), verify-dashboards 0 errors on all four
+boards (empties are alert-state series while nothing fires, masked ones are `or vector(0)`
+counters), the last full run's MTTD p50 54.7 s / p95 109.8 s and MTTR p50 34.6 s / p95 39.7 s
+visible on the board from Prometheus, screenshots checked at 1600 px.
+
 ## 2026-09-16 (night) — adversarial review of the whole day's work, remediated
 
 **What happened:** eight independent read-only reviewers (rules, burn generator, harness,

@@ -47,6 +47,7 @@ node harness/run.mjs --only conformance                      # one suite: confor
 node harness/run.mjs --only chaos --scenario queue-full,dlq-poison
 node harness/run.mjs --settle 120 --out /tmp/run1            # wait before first check; alternate report dir
 node harness/run.mjs --recover  # repair a lab left in a fault state (listener, channels, consumer, APP.BURST, DLQ)
+node harness/run.mjs --publish reports/cert-report.json   # re-publish a report to the alert-sink (/metrics → dashboards' MTTD/MTTR)
 npm run mqsc                    # runmqsc QM1 inside the container (local bindings, works with listener stopped)
 curl http://127.0.0.1:29095/events   # alert-sink webhook ledger; DELETE /events clears it
 ```
@@ -152,8 +153,10 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   stripping `alert:`, dashes and underscores and lowercasing, so
   `alert:ibmmq-queue-manager-down` matches `IBMMQQueueManagerDown`.
 - Dashboards: for each pack dashboard with `source: file://...`, the JSON `uid` must
-  equal the pack `id`, and each `panel_bindings[].binds_to` must appear as some panel's
-  `description: "binds_to: <value>"` (the `binds` option in `gen-dashboards.mjs`).
+  equal the pack `id`, and each `panel_bindings[].binds_to` must appear in some panel's
+  `pack.binds_to` array (the `binds` option in `gen-dashboards.mjs`; one panel may bind
+  several ids, e.g. the error-budget bar gauge binds all eight SLOs). Panel `description`
+  is for humans; check-rules still accepts the legacy `description: "binds_to: …"` line.
   A dashboard with `template:` and no `source` is skipped (reported as template-bound
   by conformance C7). `ibmmq-unified` is laid out by `flow()` (add panels in reading
   order, never by coordinates). After changing any dashboard run `npm run
@@ -163,6 +166,17 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   itself is unverified) and treats Loki streams carrying `__error__` as errors. It refuses
   to run while a symptom alert is firing unless `--allow-firing` is given. Burn-rate stat
   colours come from each SLO's policy factors (`burnThresholds()`), not a fixed 6×/14×.
+  The unified board follows the pack's own section order (SLIs/SLOs → validation with MTTD
+  and MTTR → policy and alerting → remediation → signals → pipelines → logs and traces); the
+  visual system (palette `C`, stat modes, timelines, bar gauges) is described in the
+  generator header. State timelines need `color.mode: fixed`; with `thresholds` Grafana 12
+  ignores value-mapping colours and renders grey rows (measured).
+- Certification metrics: every harness run POSTs its summary to the alert-sink (`/results`),
+  which exposes it at `/metrics` (`mq_cert_verdict_code`, `mq_cert_mttd_seconds{experiment,
+  alertname}`, `mq_cert_mttr_seconds`, `mq_cert_*_quantile_seconds`, `mq_cert_checks`); the
+  collector scrapes it as job `certification` (pack `pipelines` lists it), and the boards'
+  validation row reads it. After an alert-sink restart the memory is empty:
+  `node harness/run.mjs --publish reports/cert-report.json` re-publishes the last report.
 - Chaos: each `validation.chaos_experiments[].id` needs an entry in the `faults` map in
   `harness/checks/chaos.mjs` (inject + recover), otherwise it is SKIP.
   `fault.duration` is the hold time, `expected_mttd` the target, and

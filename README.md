@@ -30,7 +30,7 @@ build context on Windows.
 |---|---|---|
 | L1 Contract — 8 SLIs, 8 SLOs | PromQL over `ibmmq_*` (mq_prometheus), `up{job="ibmmq-native"}`, `mq_canary_*` | `packs/ibmmq.pack.yaml` |
 | L2 Telemetry | OTel Collector 0.161 (prometheus + filelog + OTLP receivers → remote-write, Loki OTLP, Tempo OTLP) | `stack/otelcol/config.yaml` |
-| L3 Insight | 11 SLI recording rules + 21 error-budget rules generated from the policy, 4 provisioned Grafana dashboards bound to SLIs/SLOs (overview, queues & channels, SLO burn, and **IBM MQ — Unified Observability**: everything on one board, 9 rows from SLOs to logs and traces) | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
+| L3 Insight | 11 SLI recording rules + 21 error-budget rules generated from the policy, 4 provisioned Grafana dashboards bound to SLIs/SLOs (overview, queues & channels, SLO burn, and **IBM MQ — Unified Observability**: one board in the pack's own order — SLIs and SLOs, then the validation that proves them with the last certification's verdict, MTTD and MTTR per alert against budget, then policy and alerting, remediation from the pack, the signals underneath, the pipeline, logs and traces) | `stack/prometheus/rules/`, `stack/grafana/dashboards/` |
 | L4 Action | 12 symptom alerts (incl. a telemetry-pipeline-down alert, because an absent series fires nothing) + 14 multi-window burn-rate alerts + 3 forecast alerts (the latter two generated from `spec.policy`), promtool unit tests for the alerts that once misbehaved live, Alertmanager → webhook ledger, 7 runbooks (the automations and rate guardrails they mention are declared in the pack's `remediation` for the platform; this lab does not enforce them) | `stack/prometheus/rules/ibmmq.alerts.yml`, `ibmmq.burn.yml`, `stack/prometheus/tests/`, `runbooks/` |
 | L5 Validation | canary + orders flow, 5 chaos experiments, MTTD/MTTR measurement, report | `canary/`, `harness/` |
 
@@ -56,7 +56,7 @@ fires when the first is fine and the second is not. The chaos suite proves both
 | Loki | http://127.0.0.1:23100 |
 | MQ console | https://127.0.0.1:29443/ibmmq/console (admin / passw0rd) |
 | MQ listener | 127.0.0.1:21414 (`DEV.APP.SVRCONN`, app / passw0rd) |
-| alert-sink ledger | http://127.0.0.1:29095/events |
+| alert-sink ledger | http://127.0.0.1:29095/events · `/metrics` exposes the last certification run (verdict, MTTD/MTTR per alert) for the boards |
 
 ## Harness
 
@@ -65,7 +65,13 @@ node harness/run.mjs                              # everything → reports/
 node harness/run.mjs --skip-chaos                 # conformance + synthetic (~1 min) → reports/quick/
 node harness/run.mjs --only chaos --scenario queue-full,dlq-poison
 node harness/run.mjs --recover                    # repair a lab an interrupted run left in a fault state
+node harness/run.mjs --publish reports/cert-report.json   # re-publish a report's MTTD/MTTR to the alert-sink → dashboards
 ```
+
+Every run publishes its summary to the alert-sink, whose `/metrics` the collector scrapes:
+the dashboards' validation row shows the last verdict, when it ran, MTTD p50/p95 and MTTR
+p50/p95 against the pack baselines, and every expected alert's detection time against its
+`expected_mttd`.
 
 Exit code 0 PASS · 1 WARN · 2 FAIL · 3 harness error (no verdict). A mistyped suite or
 scenario name is an error, never a PASS; an experiment without a fault implementation is a
