@@ -32,11 +32,11 @@ receivers:
           honor_labels: true                # its series carry qmgr= already; without this they arrive as exported_qmgr
           static_configs:
             - targets: [ "mq:9157" ]
-              labels: { qmgr: "${env:MQ_QMGR_NAME}", source: native }
+              labels: { qmgr: "QM1", environment: lab, site: lab, shape: container, source: native }
         - job_name: ibmmq-exporter          # mq_prometheus as an MQ client — sees what apps see
           static_configs:
             - targets: [ "mq-exporter:9157" ]
-              labels: { source: exporter }
+              labels: { environment: lab, site: lab, shape: container, source: exporter }
         - job_name: otel-collector
           static_configs:
             - targets: [ "127.0.0.1:8888" ]
@@ -44,6 +44,7 @@ receivers:
           scrape_interval: 30s
           static_configs:
             - targets: [ "alert-sink:9095" ]
+              labels: { environment: lab }
 
   filelog:
     include: [ /var/lib/docker/containers/*/*-json.log ]
@@ -167,8 +168,8 @@ processors:
 
   resource:
     attributes:
-      - { key: deployment.environment, value: "${env:ENV}", action: upsert }
-      - { key: mq.qmgr.name,           value: "${env:MQ_QMGR_NAME}", action: upsert }
+      - { key: deployment.environment, value: "lab", action: upsert }
+      - { key: mq.qmgr.name,           value: "QM1", action: upsert }
 
   # Record-level promotions only (service identity is set per entry in the filelog receiver):
   # W3C trace context onto app records, MQ fields onto qmgr records, body = MQ message text.
@@ -203,6 +204,7 @@ exporters:
     # recording rules carried it.
     external_labels:
       service: ibmmq
+      environment: lab
 
   otlphttp/loki:
     endpoint: http://loki:3100/otlp

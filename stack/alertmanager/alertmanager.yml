@@ -10,7 +10,7 @@ route:
   group_interval: 10s
   repeat_interval: 1h
   routes:
-    - matchers: [ severity = SEV1 ]
+    - matchers: [ environment = "lab", severity = SEV1 ]
       receiver: alert-sink
       group_wait: 2s
 
