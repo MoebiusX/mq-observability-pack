@@ -24,7 +24,8 @@ const opt = (n) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : nu
 const packPath = opt('--pack') || process.env.PACK || 'packs/ibmmq.pack.yaml';
 const pack = parseYaml(readFileSync(resolve(root, packPath), 'utf8'));
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
-const repoUrl = `https://github.com/${String(pkg.repository || '').replace(/^github:/, '')}/blob/main`;
+// Runbook links on the boards point at this repository; a fork sets REPO_URL (or its own package.json repository).
+const repoUrl = process.env.REPO_URL || `https://github.com/${String(pkg.repository || '').replace(/^github:/, '')}/blob/main`;
 const firstSource = (pack.spec.dashboards || []).find(d => d.source)?.source || 'file://stack/grafana/dashboards/x.json';
 const outDir = resolve(root, opt('--out-dir') || dirname(firstSource.replace(/^file:\/\//, '')));
 
