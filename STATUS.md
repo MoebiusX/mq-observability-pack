@@ -2,27 +2,116 @@
 
 ## Current state (rewritten each session; the dated log below is history)
 
-- **Branches.** `main` = PR #6 merge pending via PR #7 (`develop` → `main`, open, Auto-fix on);
-  `develop` carries the vendored Observogram generators. Tag `v0.2.0` = PR #3 merge.
-- **Lab.** Up on Nitro5 since 2026-09-16 21:08Z, running the regenerated burn rules
-  (canary ratio over probes that happened); last `certify:quick` PASS 16/16 after that reload;
-  Grafana holds a "Reference packs (generated)" folder with 15 imported boards from
-  Observogram's three reference packs (delete when done).
-- **Generators.** Live in Observogram (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
-  merged: PR #87 library, PR #88 unified board for every pack); this repo vendors them
-  (`vendor/observogram/SOURCES.json` records commit and hash per file, `tools/check-pins.mjs`
-  verifies) and keeps the MQ boards in `tools/dashboards/ibmmq.mjs`.
-- **In flight (Observogram).** `codex/compile-burn-rules`: wiring `compilePrometheusRules` to the
-  burn-rules library (orchestrated job, golden-gated). Fleet generator design
-  (inventory-driven `gen-site`, `--env prod`, `--profile non-container`, degraded single-vantage
-  alert set) in progress; blocked only on the registry format (`50974-mq-registry`, not
-  reachable from here).
-- **Open feedback, in priority order.** (1) fleet/site generator from an inventory; (2) prod
-  overrides applied by the generators; (3) non-container profile (C6 family, 16 native panels);
-  (4) canary TLS/CCDT; (5) degraded mode for single-vantage fleets; (6) RDQM signal and
-  failover experiment; (7) Helm chart defaults and scaffold gates (repos not available here);
-  (8) sustainability: pin drift (done: `tools/check-pins.mjs` in `npm test` and CI), vendor
-  staleness (done), STATUS structure (this block), identity (`REPO_URL` override done).
+- **Branches.** `main` = PR #7 merge (2026-09-17 12:57Z). `develop` = 766d1b4 + PR #8
+  (`feat/pin-drift-check`, open). `feat/gen-site` (this session, stacked on PR #8): the fleet
+  generator, increment 1; PR into `develop` to open once #8 merges (or against it). Tag
+  `v0.2.0` = PR #3 merge.
+- **Lab.** Up on Nitro5 since 2026-09-16; since 2026-09-17 22:47 local it runs the files
+  gen-site renders from `sites/lab.inventory.yaml` (collector, Prometheus, Alertmanager and the
+  new inventory rules: environment wiring everywhere); `certify:quick` PASS 16/16 at 20:52Z on
+  that state. Grafana still holds the "Reference packs (generated)" folder (15 boards; delete
+  when done).
+- **The lab is a rendered site.** `npm run site` renders it; every generated file with a twin
+  under `stack/` is byte-identical (`tools/test-site.mjs` T10, in `npm test`). The generic
+  core is Observogram's `tools/lib/site/*` (PR #90 open, vendored at `codex/gen-site` 0594723);
+  the MQ module is `tools/site/ibmmq.mjs` + `tools/site/templates/*.mjs`; inventories under
+  `sites/`; `sites/fleet-example.inventory.yaml` (prod: RDQM group behind a floating IP, TLS,
+  non-container, 30 s step; staging: client exporter only) renders and validates in CI with
+  promtool / amtool / otelcol-contrib; `check-rules --site` cross-checks a partition.
+- **Generators.** Observogram library (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
+  PR #87 + #88 merged; PR #89 open wires `compilePrometheusRules` to the same PromQL), vendored
+  with commit and hash per file (`vendor/observogram/SOURCES.json`, `tools/check-pins.mjs`;
+  the online staleness probe warns for `lib/site/*` until PR #90 lands on `develop`).
+- **Feedback status.** (1) fleet/site generator: increment 1 done (inventory v1, multi-environment
+  inheritance and partitions, exact-count pack anchors, every stack file as a template, per-qmgr
+  exporter and canary config, file_sd, inventory rules, fleet Alertmanager, registry adapter
+  pattern); (2) prod overrides applied: done (timing model over the closed override vocabulary;
+  T4 proves `[90s]`, `for: 2m`, 3 m gate, 30 s / 10 s group waits, rebudgeted chaos MTTD);
+  (3) non-container profile: boards done (delta estimator, appendix-B names), harness C6 family
+  in `site.json.harness` (read by the harness in increment 2); (4) canary TLS/CCDT: `canary.env`
+  carries MQ_CCDT_URL / MQ_KEY_REPOSITORY / MQ_CIPHER, the canary reads them in increment 3;
+  (5) single-vantage degraded set: rendered and promtool-tested (Unreachable without gate,
+  PipelineDown on the exporter job, Silent from the inventory join, Restarted from uptime), live
+  certification of a single-vantage lab in increment 2; (6) RDQM: increment 4; (7) Helm/scaffold
+  gates: increment 5; (8) sustainability: done.
+- **Open questions for the owner.** Registry shape (`50974-mq-registry`: one record); prod alert
+  path (per-environment Alertmanager, the default, or a shared one behind a Mimir ruler →
+  `rule_labels: true`); label names (`environment` / `deployment.environment` assumed); prod
+  vantage (dual assumed: MQ SERVICE local exporter + client exporter); environment set
+  (prod/staging/lab assumed).
+
+## 2026-09-17 (evening) — gen-site increment 1: a fleet from one pack and an inventory; the lab becomes a rendered site
+
+**Ask:** the fleet feedback's item 1 ("no fleet/site generator — THIS IS THE KEY"), with
+multi-environment as a first-increment requirement (hosts reference their environment, or one
+inventory per environment; both must merge).
+
+**Design** (judge synthesis of two independent designs, `scratchpad/fleet-design.md`): the
+reference artefacts are the templates (each rendered file is the lab file with `${...}` holes
+only where the inventory or the environment drives a value; fleet-only blocks are guarded by
+conditions false for the lab); the reference pack is rewritten as text with exact-count anchors
+(a mismatching count fails naming the anchor); `metadata.name` stays `ibmmq` (environment is a
+label, not a pack name); secrets are references. Generic core in Observogram, MQ module here.
+
+**Observogram** (`codex/gen-site`, PR #90): `tools/lib/site/{inventory.schema.json,inventory.mjs,
+timing.mjs,derive.mjs,run.mjs}` (browser-safe, relative imports only, so the vendored copy works
+unchanged), `tools/gen-site.mjs`, fixtures, `tools/test-gen-site.mjs` 28/28, `docs/gen-site.md`.
+Two adversarial review rounds fixed eight findings (`--pack` wins over differing inventory pack
+paths; queue-manager names unique per environment, not globally; anchor counts asserted over the
+reference text before any substitution; host-only environments need their block; `client_port`
+unique per exporter host across environments; an omitted `params` validates as `{}`). Also
+opened PR #89 (`codex/compile-burn-rules`): `compilePrometheusRules` and the per-SLO and
+Grafana-managed builders emit the burn-rules library's PromQL (six review rounds; three HIGH
+findings fixed: the events-kind fill on a good/total grouping mismatch, a branch base behind
+develop, per-SLO artefacts bypassing the declared-rule dedupe; the rest are follow-ups in the PR).
+
+**This repo** (`feat/gen-site`, 14 commits): `sites/lab.inventory.yaml`, `sites/fleet-example.inventory.yaml`;
+`vendor/observogram/lib/site/*` at 0594723; `tools/gen-site.mjs` wrapper; `tools/site/ibmmq.mjs`
+(params schema, 18 named anchors re-verified against the pack — `[30s]` is ×6, the comment
+included —, removals for the degraded set, chaos MTTD rebudget, harness block, self-checks);
+`tools/site/templates/*.mjs` for prometheus.yml, recording, alerts, inventory rules, promtool
+tests, collector gateway (static targets for the lab, file_sd for a fleet), Alertmanager (per
+environment + `alertmanager.fleet.yml`), datasources, `mq_prometheus.yaml` and `canary.env` per
+queue manager, file_sd; `tools/dashboards/ibmmq.mjs` follows the site (vantage, profile, names);
+`check-rules --site`; runbooks `qmgr-silent.md`, `qmgr-restarted.md`; CI renders the lab and the
+fleet example and validates every partition; `tools/test-site.mjs` T1–T11 (21 tests) in `npm test`.
+
+**Corrections found by the validators, not by reading:** the production queue regex reached PromQL
+double-quoted strings unescaped (`ORD\..*` is an unknown escape sequence to promtool; now
+`promqlString()` doubles the backslash in the templates and the pack anchors); a promtool case had
+one zero sample too many (`0x3` is four samples); the Tempo datasource URL lost its host because
+`tempo:4317` parses as a URL scheme.
+
+**Deviations from the design, all deliberate:** the promtool unit-test file is rendered only for
+lab-timed environments (step 10, no symptom override) and listed under `site.json.skipped`
+otherwise, rather than scaled guesses; the lab keeps `static_configs` (with the labels) while a
+fleet uses `file_sd_configs`; the exporter job gets a target `qmgr` label only outside the lab
+(`honor_labels: true` there, so `up{}` joins the inventory); `IBMMQQueueManagerSilent` is rendered
+for single vantage only (dual has `IBMMQQueueManagerDown`); the inventory rules file is emitted
+for every environment; the exporter's TLS key repository is a comment (`MQSSLKEYR`) next to
+`ccdtUrl`, not a config key.
+
+**Static gates:** `npm test` (lint, pack schema, pins offline, 21 site tests) green; check-rules
+green on `stack/` and on the lab, prod and staging partitions; `npm run generate` no-op;
+`npm run site:check` ok; promtool check rules SUCCESS on every partition (prod 12/38/2/11,
+staging 12/33/2/9, lab 11/12/38/1), promtool test rules SUCCESS on the lab and on staging (the
+nine degraded-set cases), amtool check-config on prod, staging, the lab and the fleet file,
+otelcol validate on the three gateway configs, docker compose config ok.
+
+**Live:** the four lab files that gained environment wiring were copied into `stack/` from the
+render; `docker compose restart otel-collector alertmanager`, Prometheus reloaded; after the
+five-minute staleness window of the pre-restart series (checked: `count(up{job="ibmmq-native"})`
+back to 1, nothing firing) `npm run certify:quick` **PASS 16/16** at 20:52Z (C1–C10, S1–S6; canary
+100 %, p99 20.6 ms; orders 4.93/4.66 per second; 18/18 recording rules incl. the new inventory
+group; every MQ series carries `environment="lab"`; the SEV1 route matches it).
+
+**Not done (next increments):** 2 — the lab written by `gen-site --stack` (`npm run generate`),
+harness reads `site.json` (C2 vantage, C6 families, S1 probe, S4 orders, chaos names), MQSC /
+`qm.ini` / local exporter / host agent templates, live certification of a single-vantage lab;
+3 — canary TLS/CCDT and `qmgr` attribute; 4 — RDQM textfile metrics, failover experiment,
+per-qmgr SLOs; 5 — Helm fragments, registry-driven CI gate in mq-ops. The workflows that built
+this ran out of account credits three times; the final verification rounds of the core and of
+the compile wiring did not run (the PRs say exactly what was verified).
 
 ## 2026-09-17 (late afternoon) — sustainability items from the fleet feedback
 
