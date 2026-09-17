@@ -1,0 +1,48 @@
+# The lab as an inventory: one queue manager, environment `lab`, inherited from this
+# file's `env` by its host and its queue manager. `node tools/gen-site.mjs --inventory
+# sites/lab.inventory.yaml --env lab` must reproduce the certified files under stack/
+# byte-for-byte except the asserted environment-wiring additions (tools/test-site.mjs).
+inventory: v1
+env: lab
+pack: packs/ibmmq.pack.yaml
+environments:
+  lab:
+    scrape_interval: 10s
+    vantage: dual
+    profile: container
+    endpoints:
+      remote_write: http://prometheus:9090/api/v1/write
+      loki: http://loki:3100/otlp
+      tempo: tempo:4317
+      alertmanager: http://alertmanager:9093
+      alert_sink: http://alert-sink:9095
+      otlp: http://otel-collector:4318
+      grafana: http://grafana:3000
+    receivers: { sev1: webhook://alert-sink, sev2: webhook://alert-sink, sev3: webhook://alert-sink }
+    params:
+      app_queue_pattern: 'APP.*'
+      monitored_queues: [ 'APP.*', 'DEV.*' ]
+      deadq: APP.DLQ
+      canary_queue: APP.CANARY
+      orders_queue: APP.ORDERS.REQ
+      burst_queue: APP.BURST
+      listener: SYSTEM.LISTENER.TCP.1
+      users: { monitor: admin, canary: app }
+      monitoring_host: mq-exporter
+      exporter_poll_interval: 10s
+      canary_interval: 10s
+      log_source: docker
+hosts:
+  - { name: mq, site: lab, roles: [container] }
+queue_managers:
+  - name: QM1
+    shape: container
+    hosts: [ mq ]
+    address: { host: mq, port: 1414 }
+    params:
+      native_port: 9157
+      client_port: 9157
+      # image-provided channels (stack/mq/20-observability.mqsc), so the MQSC template defines none
+      channels: { monitoring: DEV.ADMIN.SVRCONN, canary: DEV.APP.SVRCONN, define: false }
+      tls: null
+      credentials: { monitor_secret: /run/secrets/mqAdminPassword, canary_secret: /run/secrets/mqAppPassword }
