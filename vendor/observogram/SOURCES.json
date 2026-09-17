@@ -1,0 +1,47 @@
+{
+  "note": "Recorded upstream of every vendored file. tools/check-pins.mjs verifies content against the commit and warns when develop moved. Refresh: copy the file, then node vendor/observogram/gen-sources.mjs <local>=<commit>.",
+  "files": {
+    "lib/validator.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/validator.mjs",
+      "commit": "c819ff7",
+      "track": "develop",
+      "sha256": "bd1a4f404a5304d6d0baa1bdf3ecfc6073f2fa6fa4c9a49acbf72cf59cfb6b04"
+    },
+    "lib/mini-yaml.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/mini-yaml.mjs",
+      "commit": "6fcb7ef",
+      "track": "develop",
+      "sha256": "3fe31438409e2308d6a8a0ca524fd3e4577b7c33b12d2edc5db2bef626a9a0c9"
+    },
+    "observability-pack.schema.json": {
+      "repo": "MoebiusX/Observogram",
+      "path": "vendor/observability-pack-spec/v1.2/observability-pack.schema.json",
+      "commit": "c44cc73",
+      "track": "develop",
+      "sha256": "4be376656efc877cd2f907d1714549ca0fd679e969ac426303966267ff21fbaf"
+    },
+    "lib/dashboards/lib.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/dashboards/lib.mjs",
+      "commit": "c42ced3",
+      "track": "develop",
+      "sha256": "e24783349c1c42f44f27f48ac77f12d5c3f3ddf95d64578129c17d78bf9fbad8"
+    },
+    "lib/dashboards/generic.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/dashboards/generic.mjs",
+      "commit": "bc36ad7",
+      "track": "develop",
+      "sha256": "8861d96ff7983efcadf6da2708577b25b9b2976ac6c5909ea092045024ca1ed8"
+    },
+    "lib/burn-rules.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/burn-rules.mjs",
+      "commit": "c42ced3",
+      "track": "develop",
+      "sha256": "6215f6ee71d65a80e8163b8e664fa568ad91bfcf1a85bfe93e52e49ccaa41d68"
+    }
+  }
+}

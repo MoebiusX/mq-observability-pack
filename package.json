@@ -4,7 +4,9 @@
   "private": true,
   "description": "Self-contained IBM MQ observability lab: ObservabilityPack manifest, OTel-native telemetry stack, synthetic canary, chaos harness and certification report generator.",
   "type": "module",
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "author": "Carlos Montero (https://github.com/MoebiusX)",
   "repository": "github:MoebiusX/mq-observability-pack",
   "license": "MIT",
@@ -24,6 +26,7 @@
     "certify:quick": "node harness/run.mjs --skip-chaos",
     "certify:chaos": "node harness/run.mjs --only chaos",
     "mqsc": "docker compose exec mq runmqsc QM1",
-    "test": "npm run lint && npm run validate:pack"
+    "test": "npm run lint && npm run validate:pack && node tools/check-pins.mjs --offline",
+    "check:pins": "node tools/check-pins.mjs"
   }
 }

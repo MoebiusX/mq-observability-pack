@@ -51,6 +51,11 @@ jobs:
           curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
           tar xzf alertmanager-${AM_VERSION}.linux-amd64.tar.gz --strip-components=1 alertmanager-${AM_VERSION}.linux-amd64/amtool
           ./amtool check-config stack/alertmanager/alertmanager.yml
+      - name: version pins agree across files; vendored copies match their recorded upstream commit
+        # compose defaults, .env.example, this workflow's tool versions, the Dockerfiles and the
+        # README must name the same versions; vendor/observogram/* must equal the file at the commit
+        # SOURCES.json records (a moved upstream develop is a warning, not a failure).
+        run: node tools/check-pins.mjs
       - name: generated artefacts are not hand-edited (dashboards, burn-rate rules)
         # git diff alone cannot see a newly generated but untracked file; git status can.
         run: |

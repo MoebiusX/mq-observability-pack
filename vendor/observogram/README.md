@@ -12,5 +12,8 @@ without a dependency on the Observogram checkout:
 | `lib/dashboards/generic.mjs` | `tools/lib/dashboards/generic.mjs` (boards for any pack from its `dashboards[]`; this repo uses its binding check) |
 | `lib/burn-rules.mjs` | `tools/lib/burn-rules.mjs` (spec.policy → burn-rate, forecast and error-budget rules; `tools/gen-burn-rules.mjs` wraps it with the lab step and runbooks) |
 
-The three dashboard and burn-rule files come from Observogram branch `codex/pack-dashboards`
-(PR #87 into `develop`, commit c42ced3, 2026-09-17). Refresh by copying the six files again; do not edit here.
+`SOURCES.json` records, for every file, the upstream path, the commit it was copied from and its
+content hash; `tools/check-pins.mjs` fails when a copy no longer matches that commit and warns
+when Observogram's `develop` has moved past it. Refresh: copy the file from Observogram, then
+`node vendor/observogram/gen-sources.mjs <local>=<commit>` to record the new commit and hash.
+Do not edit the copies here.
