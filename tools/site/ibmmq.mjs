@@ -206,7 +206,11 @@ export function fleet(ctxs) {
 }
 
 export function dashboardOptions(ctx) {
-  return { environment: ctx.env, vantage: ctx.vantage, profile: ctx.profile, names: ctx.p, repo_url: ctx.repoUrl, qmgrs: ctx.qmgrs.map(q => q.name), step: ctx.timing.step };
+  return {
+    environment: ctx.env, vantage: ctx.vantage, profile: ctx.profile, names: ctx.p, repo_url: ctx.repoUrl, step: ctx.timing.step,
+    qmgrs: ctx.qmgrs.map(q => q.name),
+    monitoring_channels: [...new Set(ctx.qmgrs.map(q => q.params?.channels?.monitoring).filter(Boolean))],
+  };
 }
 export function boards({ pack, repoUrl, site }) {
   return generateDashboards(pack, { repoUrl, site }).boards;
