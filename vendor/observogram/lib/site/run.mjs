@@ -87,9 +87,13 @@ function addFile(files, path, content, errors) {
 
 /**
  * run({ pack, packText, schema, inventorySchema, inventories, env, module, adapter, registry,
- *       repoUrl, strict, lib }) → { partitions, fleet, errors, warnings, usage, selected }
+ *       repoUrl, strict, lib, packChosen }) → { partitions, fleet, errors, warnings, usage, selected }
+ *
+ * `packChosen: true` says the caller picked `pack` itself (the CLI always does: `--pack`, or
+ * the unique `pack:` of the inventories resolved relative to each file), so inventories whose
+ * `pack:` strings differ are not an error (design §2.1: the CLI wins).
  */
-export function run({ pack, packText, schema = null, inventorySchema = null, inventories = [], env = null, module = null, adapter = null, registry = undefined, repoUrl = null, strict = false, lib = null } = {}) {
+export function run({ pack, packText, schema = null, inventorySchema = null, inventories = [], env = null, module = null, adapter = null, registry = undefined, repoUrl = null, strict = false, lib = null, packChosen = false } = {}) {
   const errors = [], warnings = [];
   const fail = (usage = false) => ({ partitions: {}, fleet: null, errors, warnings, usage, selected: [] });
   if (!isObj(pack) || typeof packText !== 'string') { errors.push('run: pack (object) and packText (string) are required'); return fail(); }
@@ -98,7 +102,7 @@ export function run({ pack, packText, schema = null, inventorySchema = null, inv
   const loaded = loadInventories(inventories, { schema: inventorySchema, module, adapter, registry });
   errors.push(...loaded.errors);
   if (errors.length) return fail();
-  const merged = mergeInventories(loaded.files);
+  const merged = mergeInventories(loaded.files, { packChosen });
   errors.push(...merged.errors);
   if (errors.length) return fail();
   const v = validateInventory(merged.inventory, pack, { schema: inventorySchema, module, strict });

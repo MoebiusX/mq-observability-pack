@@ -4,10 +4,16 @@
 // re-serialised, so comments and layout survive and the lab site pack is byte-identical to the
 // reference. Every substitution is an exact-count anchor: `{ name, find, replace, count }`; when
 // `find` matches a different number of times than declared the derivation fails naming the
-// anchor, so a hand edit that breaks an anchor is caught, never skipped. Pure ESM, browser-safe.
+// anchor, so a hand edit that breaks an anchor is caught, never skipped. Counts are asserted
+// over the REFERENCE text, all anchors at once, before anything is applied: an anchor that
+// overlaps an earlier one (`interval: 10s` inside `scrape_interval: 10s`) then has the same
+// count in every environment instead of passing the lab (identity replacement) and failing prod.
+// A replacement must not introduce text a later anchor matches: that is caught after the fact
+// (the later anchor finds more than its reference count) and fails naming the anchor.
+// Pure ESM, browser-safe.
 //
 //   assertCounts(text, subs)                       throws naming the first mismatching anchor
-//   applySubstitutions(text, subs)                 → { text, applied }
+//   applySubstitutions(text, subs)                 → { text, applied } (counts over `text`, then applied in order)
 //   dropItem(text, key, value)                     deletes every YAML list item `- key: value` (block
 //                                                  or flow form) through the end of that item
 //   splicePackSnippet(text, snippet, startMarker)  replaces the generated block between the marker
@@ -49,13 +55,20 @@ export function assertCounts(text, subs) {
   return counts;
 }
 
-/** Apply exact-count substitutions in order (each anchor is asserted against the text it sees). */
+/**
+ * Apply exact-count substitutions in order. Every anchor's count is asserted against the
+ * reference `text` first (design §6: exact-count anchors over the reference pack text), so an
+ * anchor an earlier replacement partly consumed still passes; an anchor that an earlier
+ * replacement made MORE frequent (the replacement introduced text it matches) is an error.
+ */
 export function applySubstitutions(text, subs) {
   const applied = [];
+  assertCounts(text, subs);
   let out = text;
   (subs || []).forEach((s, i) => {
     const name = anchorName(s, i);
-    assertCounts(out, [s]);
+    const found = countMatches(out, s.find);
+    if (found > s.count) throw new Error(`anchor ${name}: an earlier substitution introduced text it matches (${found} occurrences now, ${s.count} in the reference)`);
     const before = out;
     if (isRe(s.find)) out = out.replace(globalRe(s.find), s.replace);
     else out = out.split(s.find).join(typeof s.replace === 'function' ? s.replace(s.find) : String(s.replace));

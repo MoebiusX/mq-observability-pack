@@ -8,7 +8,7 @@
 //
 // Pipeline:
 //   loadInventories(inputs, { schema, module, adapter, registry })  → { files, errors }
-//   mergeInventories(files)                                         → { inventory, errors }
+//   mergeInventories(files, { packChosen })                         → { inventory, errors }
 //   validateInventory(inventory, pack, { schema, module, strict })  → { errors, warnings }
 //   resolveEnvironments(inventory, pack)                            → { envs, errors }
 //
@@ -17,6 +17,10 @@
 //   qm.env   = qm.env ?? unique(env of qm.hosts) ?? file.env     (error when the hosts disagree,
 //                                                                 when qm.env differs from its
 //                                                                 hosts' env, or nothing resolves)
+// Names: a host name is unique across the whole merged inventory (a host is a machine; two
+// environments may share it, which is what the client_port check relies on); a queue-manager
+// name is unique within one environment (design §2.3), so QM1 in prod and QM1 in staging are
+// two queue managers and the check runs once the environments are resolved.
 // Every error names the offending item and the file it came from.
 
 import { parse as parseYaml } from '../mini-yaml.mjs';
@@ -123,12 +127,16 @@ export function loadInventories(inputs, { schema, module = null, adapter = null,
  * a file-level `env` applies only to that file's hosts and queue managers (kept as
  * `source: { file, env }` on each item, never written into the item's own `env`). The merged
  * model carries `files: [{ name, env, pack }]`; `pack` is the unique file-level pack reference.
+ * Two files naming different packs is an error unless `packChosen` says the caller picked the
+ * pack itself (the CLI always does: `--pack`, or each file's `pack:` resolved relative to that
+ * file, which two files in different directories cannot spell identically). Host names are
+ * unique across files; queue-manager names are checked per environment in resolveEnvironments.
  */
-export function mergeInventories(files) {
+export function mergeInventories(files, { packChosen = false } = {}) {
   const errors = [];
   const inventory = { inventory: INVENTORY_VERSION, pack: null, environments: {}, hosts: [], queue_managers: [], files: [] };
   const envOwner = {};
-  const seenHost = new Map(), seenQm = new Map();
+  const seenHost = new Map();
   const packs = [];
   for (const f of list(files)) {
     const name = f.name || 'inventory';
@@ -153,14 +161,11 @@ export function mergeInventories(files) {
     }
     for (const qm of list(doc.queue_managers)) {
       if (!isObj(qm) || !qm.name) { errors.push(`${name}: a queue manager without a name`); continue; }
-      const prev = seenQm.get(qm.name);
-      if (prev) errors.push(`${name}: queue manager ${qm.name} is also declared in ${prev}`);
-      else seenQm.set(qm.name, name);
       inventory.queue_managers.push({ ...qm, source: { file: name, env: doc.env ?? null } });
     }
   }
   const up = uniq(packs);
-  if (up.length > 1) errors.push(`the inventories name different packs: ${up.join(', ')} (pass --pack to choose)`);
+  if (up.length > 1 && !packChosen) errors.push(`the inventories name different packs: ${up.join(', ')} (pass --pack to choose)`);
   inventory.pack = up[0] ?? null;
   return { inventory, errors };
 }
@@ -253,9 +258,16 @@ export function resolveEnvironments(inventory, pack) {
   };
   const hostByName = new Map(hosts.map(h => [h.name, h]));
   for (const h of hosts) if (h.env) model(h.env).hosts.push(h);
+  const seenQm = new Map();   // `${env}:${name}` → file: a name is unique within one environment (design §2.3)
   for (const qm of qms) {
     if (!qm.env) continue;
     const m = model(qm.env);
+    const key = `${qm.env}:${qm.name}`;
+    const file = qm.source?.file ?? null;
+    if (seenQm.has(key)) {
+      const prev = seenQm.get(key);
+      errors.push(`${itemLabel('queue manager', qm)}: ${prev && prev !== file ? `also declared in ${prev}` : 'declared twice'} in environment ${qm.env}`);
+    } else seenQm.set(key, file);
     const sites = uniq(list(qm.hosts).map(hn => hostByName.get(hn)?.site).filter(Boolean));
     m.queue_managers.push({
       ...qm,
@@ -265,7 +277,8 @@ export function resolveEnvironments(inventory, pack) {
   }
   for (const env of Object.keys(envs)) {
     if (allowed.length && !allowed.includes(env)) errors.push(`environment ${env}: not in the pack's metadata.bindings.environments [${allowed.join(', ')}]`);
-    if (!envs[env].declared && envs[env].queue_managers.length) errors.push(`environment ${env}: no environments.${env} block in the inventory (endpoints are required to emit anything)`);
+    // every environment with members needs the block: a host-only environment is selected and rendered too
+    if (!envs[env].declared) errors.push(`environment ${env}: no environments.${env} block in the inventory (endpoints are required to emit anything)`);
   }
   return { envs, errors };
 }
@@ -279,8 +292,8 @@ export function resolveEnvironments(inventory, pack) {
 export function validateInventory(inventory, pack, { schema = null, module = null, strict = false } = {}) {
   const errors = [], warnings = [];
   if (!isObj(inventory)) return { errors: ['inventory: not a mapping'], warnings };
-  if (schema) {
-    const full = inventorySchema(schema, module);
+  const full = schema ? inventorySchema(schema, module) : null;
+  if (full) {
     const strip = ({ source: _source, ...rest }) => rest;
     const doc = { inventory: inventory.inventory, environments: inventory.environments || {}, hosts: list(inventory.hosts).map(strip), queue_managers: list(inventory.queue_managers).map(strip) };
     errors.push(...schemaErrors(doc, full, 'inventory'));
@@ -294,13 +307,32 @@ export function validateInventory(inventory, pack, { schema = null, module = nul
 
   const { envs, errors: resolveErrors } = resolveEnvironments(inventory, pack);
   for (const e of resolveErrors) if (!errors.includes(e)) errors.push(e);
-  const blocks = isObj(inventory.environments) ? inventory.environments : {};
   const hostByName = new Map(list(inventory.hosts).map(h => [h.name, h]));
 
+  // An absent `params` key is the empty block: resolveEnvironments defaults it to {} and the
+  // module renders from it, so the module's `required` site/host/instance params must fire
+  // whether the block is omitted or written as `{}`. The schema pass above only sees keys that
+  // exist; this validates the default in its place, under the same path, for every
+  // environment with members and every host and queue manager.
+  if (full) {
+    const blocks = isObj(inventory.environments) ? inventory.environments : {};
+    const defaulted = (owner, def, path) => {
+      if (!isObj(owner) || owner.params !== undefined) return;
+      const found = [];
+      validate({}, { $ref: `#/$defs/${def}` }, path, found, full);
+      errors.push(...found.map(e => `inventory: ${e}`));
+    };
+    for (const env of Object.keys(envs)) if (isObj(blocks[env])) defaulted(blocks[env], PARAM_DEFS.site, `$.environments.${env}.params`);
+    list(inventory.hosts).forEach((h, i) => defaulted(h, PARAM_DEFS.host, `$.hosts[${i}].params`));
+    list(inventory.queue_managers).forEach((qm, i) => defaulted(qm, PARAM_DEFS.instance, `$.queue_managers[${i}].params`));
+  }
+
+  // client_port is unique per exporter host across environments: the exporter host is a machine
+  // two environments may share (design §2.3). Without an exporter host the port is scoped to the
+  // environment, the only thing known about where that exporter runs.
+  const clientPortSeen = new Map();
   for (const [env, m] of Object.entries(envs)) {
-    if (!(env in blocks) && m.queue_managers.length === 0) continue;
     const addressSeen = new Map();
-    const clientPortSeen = new Map();
     const nativePortSeen = new Map();
     for (const qm of m.queue_managers) {
       const label = itemLabel('queue manager', qm);
@@ -317,7 +349,7 @@ export function validateInventory(inventory, pack, { schema = null, module = nul
       }
       if (p.client_port != null) {
         const eh = qm.exporter_host ?? '(no exporter_host)';
-        const key = `${eh}:${p.client_port}`;
+        const key = `${qm.exporter_host ? eh : `${env}/${eh}`}:${p.client_port}`;
         if (clientPortSeen.has(key)) errors.push(`${label}: client_port ${p.client_port} on exporter host ${eh} is also used by queue manager ${clientPortSeen.get(key)}`);
         else clientPortSeen.set(key, qm.name);
       }
