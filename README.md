@@ -143,7 +143,7 @@ packs/ibmmq.pack.yaml          the contract
 stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
-tools/                         validate-pack, check-rules, gen-dashboards, gen-burn-rules (spec.policy → Prometheus alerts)
+tools/                         validate-pack, check-rules, gen-dashboards + dashboards/ibmmq.mjs (the MQ boards), gen-burn-rules (spec.policy → Prometheus alerts); the generators are thin wrappers over Observogram's library in vendor/
 docs/                          ARCHITECTURE (four levels), INSTRUMENTING-EXISTING-MQ (existing queue managers, RDQM), CERTIFICATION, catalogue-evidence/ (evidence trail + the live metric inventory), reviews/
 runbooks/                      one per remediation trigger
 vendor/observogram/            pack schema + validator (lifted from Observogram)
