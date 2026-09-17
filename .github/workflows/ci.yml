@@ -62,3 +62,22 @@ jobs:
           node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs
           git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
           test -z "$(git status --porcelain stack/grafana/dashboards stack/prometheus/rules)" || { git status --porcelain stack/grafana/dashboards stack/prometheus/rules; exit 1; }
+      - name: sites — the fleet example renders for every environment and every partition validates
+        # gen-site (vendor/observogram/lib/site + tools/site) renders the lab and the two-environment
+        # fleet example; the pinned promtool / amtool / otelcol-contrib downloaded above check every
+        # partition's rules (and unit tests where rendered), Alertmanager file and gateway config.
+        # The lab round trip (byte-identical to stack/ except the asserted environment wiring) and
+        # check-rules --site on every partition already run inside `npm test` (tools/test-site.mjs).
+        run: |
+          set -euo pipefail
+          npm run site:check
+          node tools/gen-site.mjs --inventory sites/lab.inventory.yaml --env lab --out "$RUNNER_TEMP/sites"
+          node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env all --out "$RUNNER_TEMP/sites"
+          for p in "$RUNNER_TEMP"/sites/*/; do
+            echo "== $p"
+            ./promtool check rules "$p"prometheus/rules/*.yml
+            if [ -f "$p"prometheus/tests/ibmmq.alerts.test.yml ]; then ./promtool test rules "$p"prometheus/tests/ibmmq.alerts.test.yml; fi
+            ./amtool check-config "$p"alertmanager/alertmanager.yml
+            ./otelcol-contrib validate --config="$p"otelcol/config.yaml
+          done
+          ./amtool check-config "$RUNNER_TEMP/sites/alertmanager.fleet.yml"

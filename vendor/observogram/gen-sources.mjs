@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const dir = dirname(fileURLToPath(import.meta.url));
-const map = { 'lib/validator.mjs': 'tools/lib/validator.mjs', 'lib/mini-yaml.mjs': 'tools/lib/mini-yaml.mjs', 'observability-pack.schema.json': 'vendor/observability-pack-spec/v1.2/observability-pack.schema.json', 'lib/dashboards/lib.mjs': 'tools/lib/dashboards/lib.mjs', 'lib/dashboards/generic.mjs': 'tools/lib/dashboards/generic.mjs', 'lib/burn-rules.mjs': 'tools/lib/burn-rules.mjs' };
+const map = { 'lib/validator.mjs': 'tools/lib/validator.mjs', 'lib/mini-yaml.mjs': 'tools/lib/mini-yaml.mjs', 'observability-pack.schema.json': 'vendor/observability-pack-spec/v1.2/observability-pack.schema.json', 'lib/dashboards/lib.mjs': 'tools/lib/dashboards/lib.mjs', 'lib/dashboards/generic.mjs': 'tools/lib/dashboards/generic.mjs', 'lib/burn-rules.mjs': 'tools/lib/burn-rules.mjs',
+  'lib/site/inventory.schema.json': 'tools/lib/site/inventory.schema.json', 'lib/site/inventory.mjs': 'tools/lib/site/inventory.mjs', 'lib/site/timing.mjs': 'tools/lib/site/timing.mjs', 'lib/site/derive.mjs': 'tools/lib/site/derive.mjs', 'lib/site/run.mjs': 'tools/lib/site/run.mjs' };
 const commits = Object.fromEntries(process.argv.slice(2).map(a => a.split('=')));
 const prev = (() => { try { return JSON.parse(readFileSync(resolve(dir, 'SOURCES.json'), 'utf8')).files; } catch { return {}; } })();
 const files = {};

@@ -736,6 +736,16 @@ docker run -d --name mq-canary-qm1 --restart unless-stopped -e MODE=canary -e MQ
 
 ## 7. Step 6: rules, dashboards, alert routing
 
+> **Generated for you.** Everything in this section, and the per-queue-manager exporter and
+> canary configuration of steps 2 and 5, is what `node tools/gen-site.mjs` renders from a site
+> inventory (`sites/fleet-example.inventory.yaml` is a two-environment example with an RDQM
+> group, TLS, a non-container profile and a client-exporter-only environment; README "Sites").
+> Describe the estate once (or adapt your registry with `tools/site/adapters/example.mjs`),
+> render `--env <name>`, and the site pack, rules, tests, collector, Alertmanager, datasources,
+> boards, `mq_prometheus.yaml` and `canary.env` come out with the environment's timings and
+> labels; the lab itself is rendered from `sites/lab.inventory.yaml` byte-for-byte. The MQSC,
+> `qm.ini` and MQ SERVICE definitions of steps 1 and 2 are still by hand (increment 2).
+
 ### 7.1 A site pack
 
 The pack's three queue SLIs select the lab's names: `queue=~"APP.*"` for headroom and message

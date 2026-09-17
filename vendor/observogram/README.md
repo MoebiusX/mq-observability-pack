@@ -11,6 +11,11 @@ without a dependency on the Observogram checkout:
 | `lib/dashboards/lib.mjs` | `tools/lib/dashboards/lib.mjs` (the dashboard visual system, panel factories, flow layout and pack-derived blocks; `tools/gen-dashboards.mjs` and `tools/dashboards/ibmmq.mjs` build the four boards with it) |
 | `lib/dashboards/generic.mjs` | `tools/lib/dashboards/generic.mjs` (boards for any pack from its `dashboards[]`; this repo uses its binding check) |
 | `lib/burn-rules.mjs` | `tools/lib/burn-rules.mjs` (spec.policy → burn-rate, forecast and error-budget rules; `tools/gen-burn-rules.mjs` wraps it with the lab step and runbooks) |
+| `lib/site/inventory.schema.json` | `tools/lib/site/inventory.schema.json` (site inventory v1; the MQ module's `paramsSchema` is spliced in as `$defs/siteParams|hostParams|instanceParams`) |
+| `lib/site/inventory.mjs` | `tools/lib/site/inventory.mjs` (gen-site core: load, merge, environment inheritance and validation of inventories) |
+| `lib/site/timing.mjs` | `tools/lib/site/timing.mjs` (gen-site core: the per-environment timing model over the pack's closed override vocabulary) |
+| `lib/site/derive.mjs` | `tools/lib/site/derive.mjs` (gen-site core: exact-count text anchors, `dropItem`, the generated-block splice of the site pack) |
+| `lib/site/run.mjs` | `tools/lib/site/run.mjs` (gen-site core: orchestration and the module contract; `tools/gen-site.mjs` wraps it with the MQ module `tools/site/ibmmq.mjs`) |
 
 `SOURCES.json` records, for every file, the upstream path, the commit it was copied from and its
 content hash; `tools/check-pins.mjs` fails when a copy no longer matches that commit and warns

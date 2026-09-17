@@ -1,0 +1,7 @@
+[
+  { "host": "mqha1.prod.internal", "qmgr": "QMORD1", "env": "prod", "site": "dc1", "shape": "rdqm-ha", "ip": "10.20.5.11", "port": 1414, "ccdt": "file:///etc/mq/ccdt/QMORD1.json", "key_repository": "/etc/mq/tls/mqmon", "cipher": "ANY_TLS12_OR_HIGHER", "sslcauth": "REQUIRED", "native_port": 9157, "client_port": 9161, "rdqm_group": "ord" },
+  { "host": "mqha2.prod.internal", "qmgr": "QMORD1", "env": "prod", "site": "dc1", "shape": "rdqm-ha", "ip": "10.20.5.11", "port": 1414, "ccdt": "file:///etc/mq/ccdt/QMORD1.json", "key_repository": "/etc/mq/tls/mqmon", "cipher": "ANY_TLS12_OR_HIGHER", "sslcauth": "REQUIRED", "native_port": 9157, "client_port": 9161, "rdqm_group": "ord" },
+  { "host": "mqha3.prod.internal", "qmgr": "QMORD1", "env": "prod", "site": "dc1", "shape": "rdqm-ha", "ip": "10.20.5.11", "port": 1414, "ccdt": "file:///etc/mq/ccdt/QMORD1.json", "key_repository": "/etc/mq/tls/mqmon", "cipher": "ANY_TLS12_OR_HIGHER", "sslcauth": "REQUIRED", "native_port": 9157, "client_port": 9161, "rdqm_group": "ord" },
+  { "host": "mqpay1.prod.internal", "qmgr": "QMPAY1", "env": "prod", "site": "dc2", "shape": "host", "port": 1415, "ccdt": "file:///etc/mq/ccdt/QMPAY1.json", "key_repository": "/etc/mq/tls/mqmon", "cipher": "ANY_TLS12_OR_HIGHER", "native_port": 9157, "client_port": 9162 },
+  { "host": "mqord1.stg.internal", "qmgr": "QMORDS", "env": "staging", "site": "dc1", "shape": "host", "port": 1414, "ccdt": "file:///etc/mq/ccdt/QMORDS.json", "key_repository": "/etc/mq/tls/mqmon", "cipher": "ANY_TLS12_OR_HIGHER", "client_port": 9161 }
+]

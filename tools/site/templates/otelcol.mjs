@@ -1,51 +1,73 @@
-# OpenTelemetry Collector (contrib 0.161.x) — single collector for the MQ lab.
-#
-#  metrics : prometheus receiver scrapes (a) the queue manager's native /metrics,
-#            (b) mq_prometheus, (c) itself  → remote-write into Prometheus
-#  logs    : filelog tails docker json logs; MQ's JSON console log is parsed into
-#            attributes (ibm_messageId, ibm_serverName, loglevel) → Loki via OTLP
-#  traces  : OTLP from canary/producer/consumer → Tempo via OTLP gRPC
-#  metrics : OTLP from the canary (round-trip histogram, attempt counters) → Prometheus
+// tools/site/templates/otelcol.mjs — otelcol/config.yaml (the environment's gateway collector)
+//
+// The lab file (stack/otelcol/config.yaml) with holes for the scrape step and timeout, the scrape
+// targets (the lab keeps static_configs, one entry per queue manager, with the labels of design
+// §7.1; a fleet environment reads prometheus/file_sd/*.json), the resource attributes
+// (deployment.environment is the environment literal; mq.qmgr.name only when the environment
+// has exactly one queue manager), the export endpoints and the remote-write external labels
+// (service, environment). The docker filelog chain is rendered only when the environment's
+// log_source is docker (the lab); host agents ship AMQERR01.json elsewhere (increment 2).
+// String.raw: the filelog operators carry backslash escapes.
+//
+// Asserted lab deviations (tools/test-site.mjs T10): the static entries gain
+// environment/site/shape labels, the two ${env:MQ_QMGR_NAME} become QM1, ${env:ENV} becomes
+// lab, external_labels gains environment: lab.
 
-extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-  file_storage:
-    directory: /var/lib/otelcol
-    create_directory: true
+import { flow, targetLabels, nativeTarget, exporterTarget, hostPort, isHttps } from './lib.mjs';
 
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
+function staticEntries(ctx, source, target) {
+  return ctx.qmgrs.map(qm => {
+    const labels = targetLabels(ctx, qm, source);
+    if (source === 'exporter' && ctx.lab) delete labels.qmgr;   // the lab exporter job has no target qmgr label: its series carry their own
+    const rendered = { ...labels };
+    if (rendered.qmgr) rendered.qmgr = `"${rendered.qmgr}"`;
+    return `            - targets: [ "${target(qm)}" ]
+              labels: ${flow(rendered)}`;
+  }).join('\n');
+}
 
-  prometheus:
-    config:
-      global:
-        scrape_interval: 10s
-        scrape_timeout: 8s
-      scrape_configs:
-        - job_name: ibmmq-native            # qmgr process itself — survives listener faults
+function scrapeConfigs(ctx) {
+  const t = ctx.timing;
+  const cert = t.dur(Math.max(30, t.step));
+  if (ctx.lab) {
+    return String.raw`        - job_name: ibmmq-native            # qmgr process itself — survives listener faults
           honor_labels: true                # its series carry qmgr= already; without this they arrive as exported_qmgr
           static_configs:
-            - targets: [ "mq:9157" ]
-              labels: { qmgr: "QM1", environment: lab, site: lab, shape: container, source: native }
+${staticEntries(ctx, 'native', nativeTarget)}
         - job_name: ibmmq-exporter          # mq_prometheus as an MQ client — sees what apps see
           static_configs:
-            - targets: [ "mq-exporter:9157" ]
-              labels: { environment: lab, site: lab, shape: container, source: exporter }
+${staticEntries(ctx, 'exporter', exporterTarget)}
         - job_name: otel-collector
           static_configs:
             - targets: [ "127.0.0.1:8888" ]
         - job_name: certification            # harness results published to the alert-sink: MTTD/MTTR/verdict on the boards
-          scrape_interval: 30s
+          scrape_interval: ${cert}
           static_configs:
-            - targets: [ "alert-sink:9095" ]
-              labels: { environment: lab }
+            - targets: [ "${hostPort(ctx.endpoints.alert_sink)}" ]
+              labels: { environment: ${ctx.env} }`;
+  }
+  const native = ctx.vantage === 'dual' ? String.raw`        - job_name: ibmmq-native            # the MQ SERVICE local exporter on each queue manager — survives listener faults
+          honor_labels: true                # its series carry qmgr= already; without this they arrive as exported_qmgr
+          file_sd_configs:
+            - files: [ /etc/otelcol/file_sd/ibmmq-native.json ]
+              refresh_interval: 1m
+` : '';
+  return String.raw`${native}        - job_name: ibmmq-exporter          # mq_prometheus as an MQ client — sees what apps see
+          honor_labels: true                # the target's qmgr label lands on up{} (the inventory join); the series keep their own
+          file_sd_configs:
+            - files: [ /etc/otelcol/file_sd/ibmmq-exporter.json ]
+              refresh_interval: 1m
+        - job_name: otel-collector
+          static_configs:
+            - targets: [ "127.0.0.1:8888" ]
+        - job_name: certification            # harness results published to the alert-sink: MTTD/MTTR/verdict on the boards
+          scrape_interval: ${cert}
+          file_sd_configs:
+            - files: [ /etc/otelcol/file_sd/certification.json ]
+              refresh_interval: 1m`;
+}
 
+const FILELOG = String.raw`
   filelog:
     include: [ /var/lib/docker/containers/*/*-json.log ]
     # beginning, not end: the collector deliberately starts after the queue manager is healthy,
@@ -155,7 +177,45 @@ receivers:
         id: service_namespace
         field: resource["service.namespace"]
         value: ibmmq
+`;
 
+export function render(ctx) {
+  const t = ctx.timing, e = ctx.endpoints;
+  const docker = ctx.p.log_source === 'docker';
+  const one = ctx.qmgrs.length === 1;
+  const tlsInsecure = (url) => (isHttps(url) ? 'false' : 'true');
+  return String.raw`# OpenTelemetry Collector (contrib 0.161.x) — ${ctx.lab ? 'single collector for the MQ lab' : `gateway collector of the ${ctx.env} MQ site, GENERATED by gen-site`}.
+#
+#  metrics : prometheus receiver scrapes (a) the queue manager's native /metrics,
+#            (b) mq_prometheus, (c) itself  → remote-write into Prometheus
+#  logs    : ${docker ? `filelog tails docker json logs; MQ's JSON console log is parsed into
+#            attributes (ibm_messageId, ibm_serverName, loglevel) → Loki via OTLP` : `OTLP from the per-host agents (AMQERR01.json, increment 2) → Loki via OTLP`}
+#  traces  : OTLP from canary/producer/consumer → Tempo via OTLP gRPC
+#  metrics : OTLP from the canary (round-trip histogram, attempt counters) → Prometheus
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      global:
+        scrape_interval: ${t.dur(t.step)}
+        scrape_timeout: ${t.dur(t.scrapeTimeout)}
+      scrape_configs:
+${scrapeConfigs(ctx)}
+${docker ? FILELOG : ''}
 processors:
   memory_limiter:
     check_interval: 1s
@@ -168,9 +228,8 @@ processors:
 
   resource:
     attributes:
-      - { key: deployment.environment, value: "lab", action: upsert }
-      - { key: mq.qmgr.name,           value: "QM1", action: upsert }
-
+      - { key: deployment.environment, value: "${ctx.env}", action: upsert }
+${one ? `      - { key: mq.qmgr.name,           value: "${ctx.qmgrs[0].name}", action: upsert }\n` : ''}
   # Record-level promotions only (service identity is set per entry in the filelog receiver):
   # W3C trace context onto app records, MQ fields onto qmgr records, body = MQ message text.
   transform/mqlogs:
@@ -193,9 +252,9 @@ exporters:
     verbosity: basic
 
   prometheusremotewrite:
-    endpoint: http://prometheus:9090/api/v1/write
+    endpoint: ${e.remote_write}
     tls:
-      insecure: true
+      insecure: ${tlsInsecure(e.remote_write)}
     resource_to_telemetry_conversion:
       enabled: false
     add_metric_suffixes: true
@@ -204,17 +263,17 @@ exporters:
     # recording rules carried it.
     external_labels:
       service: ibmmq
-      environment: lab
+      environment: ${ctx.env}
 
   otlphttp/loki:
-    endpoint: http://loki:3100/otlp
+    endpoint: ${e.loki}
     tls:
-      insecure: true
+      insecure: ${tlsInsecure(e.loki)}
 
   otlp/tempo:
-    endpoint: tempo:4317
+    endpoint: ${e.tempo}
     tls:
-      insecure: true
+      insecure: ${tlsInsecure(e.tempo)}
 
 service:
   extensions: [ health_check, file_storage ]
@@ -235,10 +294,12 @@ service:
       processors: [ memory_limiter, resource, batch ]
       exporters: [ prometheusremotewrite ]
     logs:
-      receivers: [ filelog, otlp ]
+      receivers: [ ${docker ? 'filelog, otlp' : 'otlp'} ]
       processors: [ memory_limiter, resource, transform/mqlogs, batch ]
       exporters: [ otlphttp/loki ]
     traces:
       receivers: [ otlp ]
       processors: [ memory_limiter, resource, batch ]
       exporters: [ otlp/tempo ]
+`;
+}
