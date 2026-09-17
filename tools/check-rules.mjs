@@ -86,7 +86,13 @@ for (const d of pack.spec.dashboards) if (d.source) {
   let json; try { json = JSON.parse(readFileSync(resolve(root, file), 'utf8')); } catch { bad++; console.error(`✗ dashboard file missing: ${file}`); continue; }
   if (json.uid !== d.id) { bad++; console.error(`✗ dashboard uid ${json.uid} != pack id ${d.id}`); }
   const panels = (json.panels || []).flatMap(p => [p, ...(p.panels || [])]);   // rows may nest panels when collapsed
-  const bound = new Set(panels.map(p => (p.description || '').replace(/^binds_to:\s*/, '')).filter(Boolean));
+  // bindings live in the panel's `pack.binds_to` array (gen-dashboards); a legacy
+  // `description: "binds_to: a, b"` first line is still accepted
+  const bound = new Set(panels.flatMap(p => {
+    if (Array.isArray(p.pack?.binds_to)) return p.pack.binds_to;
+    const m = /^binds_to:\s*([^\n]+)/.exec(p.description || '');
+    return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+  }));
   for (const b of d.panel_bindings || []) if (!bound.has(b.binds_to)) { bad++; console.error(`✗ ${d.id}: no panel bound to ${b.binds_to}`); }
 }
 console.log(bad ? `${bad} problem(s)` : `✓ ${records.size} recording rules (${refResolved} ref: rules resolved to their SLI), ${alerts.size} alert rules (${burnWindows} burn-rate windows, ${(pack.spec.policy?.forecasts || []).length} forecasts), ${pack.spec.dashboards.length} dashboards cross-checked against the pack`);

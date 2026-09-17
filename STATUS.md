@@ -1,5 +1,67 @@
 # STATUS
 
+## 2026-09-17 (morning) — crash check, PR #3, PR #2 corrected, upstream issues drafted
+
+**What happened overnight.** The 00:14Z session ended normally (its final report is in the
+transcript, work committed and pushed, CI green). The laptop entered standby 07:22-07:45Z
+(Windows Kernel-Power 42/107, clock jumped 23 min), which froze the lab: a 23 min gap in every
+series, `MQCanaryFailing` firing for 10 s on resume while the canary reconnected (a
+firing+resolved pair in the alert-sink ledger), and the desktop app restarting, which looked
+like a session crash. Nothing was lost and the lab had no fault.
+
+**Done:**
+- PR #2 merged 2026-09-16 23:38Z at `81f23da` (20 commits). The three commits pushed after it
+  (`2ebd336` cert-metrics, `97fb313` dashboards, `5df9995` docs) were never in it: they are
+  PR #3 (`develop` → `main`, https://github.com/MoebiusX/mq-observability-pack/pull/3), CI green.
+- `fix(alert-sink)` `dbe23f5`, in PR #3: the ledger key separator in `server.mjs` was a literal
+  NUL byte typed into the source, so git treated the file as binary (no diff, no blame). Now the
+  escape sequence for U+0000: same string, verified with node --check, npm test and the two expressions
+  executed side by side. The running sink was not rebuilt; not needed.
+- PR #2's description: the "commits 21-23" section it never contained now points at PR #3.
+- Four issues against Observogram's `tools/lib/compile.mjs` (permalinks at `9197423`) drafted
+  with the measured numbers: since-start averaging on partly filled windows, single-sample SEV1
+  re-fires, forecast echo with fixed SEV3 and `method` ignored, one-directional recording-rule
+  checks (conformance name substring, drift counts). **Not filed**: this session's auto mode
+  blocks writes to external systems; the drafts and the `gh issue create` commands were handed
+  to Carlos in the session. If lost, re-derive from evidence §8 and the generator header.
+
+**Lab:** up since 2026-09-16 21:08Z, 0 container restarts, nothing firing, the sink still
+serves the 21:16Z full run's certification metrics. Left up for the PR #3 dashboard review.
+
+## 2026-09-17 (early) — dashboards restyled and reorganised around the pack; MTTD/MTTR on the boards
+
+**Ask:** professional, premium-looking dashboards that show what matters (MTTD, MTTR, SLOs)
+clearly, organised by the pack's structure the way the Kafka reference pack is.
+
+**Done (`feat(dashboards)` + `feat(cert-metrics)`):**
+- Unified board now follows the pack's section order: §1-2 SLIs and SLOs (tiles with
+  sparklines, error-budget burn per SLO as a bar gauge coloured by that SLO's own policy
+  factors, fast/slow burn curves) → §10 validation (last certification verdict, when, MTTD
+  p50/p95 and MTTR p50/p95 against the pack baselines, every expected alert's detection time
+  against its `expected_mttd`, resolution after recovery, checks per suite; then the synthetic
+  canary/orders flow) → §7-8 policy and alerting (state timelines of pending/firing, firing
+  table with severity colouring) → §9 remediation (table generated from the pack: trigger,
+  runbook link, declared automation and guardrails) → signals (availability timeline, queues
+  with headroom bars, channels timeline, resource gauges) → §3-5 pipelines/storage/queries →
+  logs and traces. Header banner with cross-board links; rows without emoji; annotations only
+  for symptom alerts.
+- Visual system in the generator: one palette, value-coloured stats (solid tiles only for
+  states), smooth gradient lines with nulls bridged across exporter gaps, dashed SLO
+  threshold lines, table legends with last/max, semantic series colours. State timelines
+  need `color.mode: fixed` on Grafana 12 (thresholds mode ignored the mapping colours —
+  found with a side-by-side test dashboard, since deleted).
+- MTTD and MTTR as metrics: the harness POSTs each run's summary to the alert-sink
+  (`/results`), the sink exposes `mq_cert_*` at `/metrics`, the collector scrapes it as job
+  `certification` (pack `pipelines` updated), `node harness/run.mjs --publish <report>`
+  re-publishes after a sink restart. The report now also carries `mttr` quantiles.
+- Pack bindings moved from `description: "binds_to: …"` to a `pack.binds_to` array per
+  panel (check-rules reads both), so descriptions are human text shown on hover.
+
+**Verification:** check-rules green (4 dashboards), verify-dashboards 0 errors on all four
+boards (empties are alert-state series while nothing fires, masked ones are `or vector(0)`
+counters), the last full run's MTTD p50 54.7 s / p95 109.8 s and MTTR p50 34.6 s / p95 39.7 s
+visible on the board from Prometheus, screenshots checked at 1600 px.
+
 ## 2026-09-16 (night) — adversarial review of the whole day's work, remediated
 
 **What happened:** eight independent read-only reviewers (rules, burn generator, harness,
@@ -181,9 +243,14 @@ Resolution after recovery: 20-40 s (canary 30 s; 80-88 s with the old rule). Ing
 canary samples 3-5 s. A full `npm run certify` takes ~11 min.
 
 ## Next (in order)
-1. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
+1. Review and merge PR #3. Then tag `v0.2.0` on `main` at the merge commit and push the tag:
+   pack and package both declare 0.2.0 and no tag or release exists yet.
+2. File the four Observogram compiler issues (drafted 2026-09-17, see above).
+3. `npm run down` when done looking at Grafana; the lab has been up since 2026-09-16 21:08Z and
+   holds nothing that is not in `reports/` (re-publish with `--publish` after the next `up`).
+4. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
    the report in `reports/` is the artefact. Expect ~25 min.
-2. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
+5. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
    integration (orders bridge RabbitMQ ↔ MQ) as a separate repo/phase.
 
 ## Decisions taken (and how to revert them)

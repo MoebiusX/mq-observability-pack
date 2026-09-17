@@ -1,9 +1,21 @@
-// alert-sink — Alertmanager webhook ledger for the certification harness.
-// Zero dependencies. Every webhook is flattened to one event per alert with the
-// wall-clock time it was RECEIVED (that is the MTTD end-point, not Alertmanager's startsAt).
+// alert-sink — Alertmanager webhook ledger for the certification harness, plus the place where
+// the harness publishes each run's results so MTTD / MTTR / verdict become Prometheus metrics
+// (scraped by the OTel Collector, job "certification") and can sit on the dashboards next to
+// the SLOs they validate.
+//
+//   POST /webhook          Alertmanager → one event per alert, stamped with the RECEIVED time
+//                          (that is the MTTD end-point, not Alertmanager's startsAt)
+//   GET  /events?since=&alertname=   the ledger (ms epoch `since`)
+//   DELETE /events         clear the ledger
+//   GET  /healthz          { ok, events, now }  — `now` lets the harness stamp injection on this clock
+//   POST /results          harness run summary (see harness/run.mjs certSummary()); kept in memory
+//   GET  /metrics          Prometheus exposition: mq_cert_* from the last published run,
+//                          mq_alert_webhooks_total / mq_alert_last_transition_timestamp_seconds from the ledger
+// Zero dependencies.
 import { createServer } from 'node:http';
 
 const events = [];
+let results = null;                                              // last published run summary
 const port = Number(process.env.PORT || 9095);
 const MAX_EVENTS = Number(process.env.MAX_EVENTS || 20000);     // ring buffer: repeat_interval re-sends long burns hourly
 const MAX_BODY = 1024 * 1024;                                    // an Alertmanager webhook is a few KB; refuse anything absurd
@@ -12,23 +24,77 @@ const json = (res, code, body) => {
   res.writeHead(code, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
 };
+const readBody = (req, res, cb) => {
+  let body = '', size = 0, tooLarge = false;
+  req.on('data', c => { size += c.length; if (size > MAX_BODY) { tooLarge = true; req.destroy(); return; } body += c; });
+  req.on('close', () => { if (tooLarge && !res.headersSent) json(res, 413, { error: 'body too large' }); });
+  req.on('end', () => { if (!tooLarge) cb(body); });
+};
+
+// ---- Prometheus exposition -------------------------------------------------------------
+const esc = (v) => String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+const line = (name, labels, value) => {
+  if (value == null || Number.isNaN(Number(value))) return null;
+  const l = Object.entries(labels || {}).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}="${esc(v)}"`).join(',');
+  return `${name}${l ? `{${l}}` : ''} ${Number(value)}`;
+};
+function metrics() {
+  const out = [];
+  const gauge = (name, help, rows) => { out.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`); for (const [labels, v] of rows) { const s = line(name, labels, v); if (s) out.push(s); } };
+  // ledger-derived
+  const counts = new Map(), last = new Map();
+  for (const e of events) {
+    const k = `${e.alertname}\u0000${e.status}`;
+    counts.set(k, (counts.get(k) || 0) + 1);
+    last.set(k, Math.max(last.get(k) || 0, e.receivedAt));
+  }
+  const split = (k) => { const [alertname, status] = k.split('\u0000'); return { alertname, status }; };
+  gauge('mq_alert_webhooks', 'Webhook events received per alert and status (ledger, resets with the sink)', [...counts].map(([k, v]) => [split(k), v]));
+  gauge('mq_alert_last_transition_timestamp_seconds', 'When the last webhook for this alert/status was received', [...last].map(([k, v]) => [split(k), v / 1000]));
+  gauge('mq_alert_sink_events', 'Events currently held in the ledger', [[{}, events.length]]);
+  // last certification run
+  if (results) {
+    const r = results;
+    gauge('mq_cert_verdict_code', 'Last certification verdict: 0 PASS, 1 WARN, 2 FAIL, 3 ERROR', [[{ verdict: r.verdict, pack_version: r.packVersion }, { PASS: 0, WARN: 1, FAIL: 2, ERROR: 3 }[r.verdict] ?? 3]]);
+    gauge('mq_cert_run_timestamp_seconds', 'When the last certification run finished', [[{}, r.finishedAt ? Date.parse(r.finishedAt) / 1000 : null]]);
+    gauge('mq_cert_run_duration_seconds', 'Wall-clock duration of the last certification run', [[{}, r.durationMs != null ? r.durationMs / 1000 : null]]);
+    gauge('mq_cert_checks', 'Checks per suite and status in the last run', Object.entries(r.checks || {}).flatMap(([suite, byStatus]) => Object.entries(byStatus).map(([status, n]) => [{ suite, status }, n])));
+    const Q = { p50: '0.5', p90: '0.9', p95: '0.95', p99: '0.99' };
+    gauge('mq_cert_mttd_quantile_seconds', 'Measured chaos MTTD quantiles (alert-sink receipt − injection)', Object.entries(r.mttd || {}).filter(([q]) => Q[q]).map(([q, v]) => [{ quantile: Q[q] }, v != null ? v / 1000 : null]));
+    gauge('mq_cert_mttr_quantile_seconds', 'Measured resolution-after-recovery quantiles (the observability system\'s MTTR share)', Object.entries(r.mttr || {}).filter(([q]) => Q[q]).map(([q, v]) => [{ quantile: Q[q] }, v != null ? v / 1000 : null]));
+    const exps = r.experiments || [];
+    gauge('mq_cert_experiment_pass', '1 when the chaos experiment passed in the last run', exps.map(x => [{ experiment: x.id, status: x.status }, x.status === 'PASS' ? 1 : 0]));
+    gauge('mq_cert_mttd_target_seconds', 'expected_mttd of the experiment (pack)', exps.map(x => [{ experiment: x.id }, x.expectedMttdMs != null ? x.expectedMttdMs / 1000 : null]));
+    gauge('mq_cert_mttd_seconds', 'Measured MTTD per experiment and expected alert', exps.flatMap(x => (x.alerts || []).map(a => [{ experiment: x.id, alertname: a.alertname }, a.mttdMs != null ? a.mttdMs / 1000 : null])));
+    gauge('mq_cert_mttr_seconds', 'Measured time from recovery to the resolved webhook, per experiment and alert', exps.flatMap(x => (x.alerts || []).map(a => [{ experiment: x.id, alertname: a.alertname }, a.resolvedAfterMs != null ? a.resolvedAfterMs / 1000 : null])));
+  }
+  return out.join('\n') + '\n';
+}
 
 createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
-  // `now` lets the harness stamp fault injection on the same clock as receivedAt (no host/VM skew).
-  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, events: events.length, now: Date.now() });
+  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, events: events.length, now: Date.now(), lastRun: results?.finishedAt ?? null });
+  if (req.method === 'GET' && url.pathname === '/metrics') { res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' }); return res.end(metrics()); }
   if (req.method === 'GET' && url.pathname === '/events') {
     const since = Number(url.searchParams.get('since') || 0);
     const name = url.searchParams.get('alertname');
     return json(res, 200, events.filter(e => e.receivedAt >= since && (!name || e.alertname === name)));
   }
   if (req.method === 'DELETE' && url.pathname === '/events') { events.length = 0; return json(res, 200, { ok: true }); }
+  if (req.method === 'GET' && url.pathname === '/results') return json(res, 200, results || {});
+  if (req.method === 'POST' && url.pathname === '/results') {
+    return readBody(req, res, (body) => {
+      try {
+        const r = JSON.parse(body || '{}');
+        if (!r || typeof r !== 'object' || !r.verdict) return json(res, 400, { error: 'expected a run summary with a verdict' });
+        results = r;
+        process.stdout.write(`${new Date().toISOString()} results published: ${r.verdict} (${r.finishedAt})\n`);
+        json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: String(e) }); }
+    });
+  }
   if (req.method === 'POST' && url.pathname === '/webhook') {
-    let body = '', size = 0, tooLarge = false;
-    req.on('data', c => { size += c.length; if (size > MAX_BODY) { tooLarge = true; req.destroy(); return; } body += c; });
-    req.on('close', () => { if (tooLarge && !res.headersSent) json(res, 413, { error: 'body too large' }); });
-    req.on('end', () => {
-      if (tooLarge) return;
+    return readBody(req, res, (body) => {
       try {
         const payload = JSON.parse(body || '{}');
         const receivedAt = Date.now();
@@ -49,7 +115,6 @@ createServer((req, res) => {
         json(res, 200, { ok: true });
       } catch (e) { json(res, 400, { error: String(e) }); }
     });
-    return;
   }
   json(res, 404, { error: 'not found' });
 }).listen(port, () => process.stdout.write(`alert-sink listening on :${port}\n`));

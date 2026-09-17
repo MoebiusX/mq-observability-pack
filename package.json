@@ -6,6 +6,7 @@
   "type": "module",
   "engines": { "node": ">=20.19" },
   "author": "Carlos Montero (https://github.com/MoebiusX)",
+  "repository": "github:MoebiusX/mq-observability-pack",
   "license": "MIT",
   "scripts": {
     "up": "docker compose up -d --build --wait",

@@ -1,6 +1,7 @@
 {
   "uid": "ibmmq-overview",
   "title": "IBM MQ — Overview (pack SLIs)",
+  "description": "IBM MQ pack SLIs, the last certification's MTTD/MTTR, error-budget burn and the signals behind them.",
   "tags": [
     "ibmmq",
     "pack",
@@ -11,9 +12,21 @@
   "version": 1,
   "editable": true,
   "graphTooltip": 1,
-  "refresh": "10s",
+  "liveNow": false,
+  "refresh": "30s",
+  "fiscalYearStartMonth": 0,
+  "weekStart": "",
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
   "time": {
-    "from": "now-30m",
+    "from": "now-1h",
     "to": "now"
   },
   "templating": {
@@ -22,51 +35,109 @@
   "annotations": {
     "list": [
       {
-        "name": "Pack alerts",
+        "name": "Symptom alerts",
         "datasource": {
           "type": "prometheus",
           "uid": "prom"
         },
         "enable": true,
-        "iconColor": "#d03b3b",
-        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\"}",
+        "hide": false,
+        "iconColor": "#F0616D",
+        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate=\"\", kind=\"\"}",
         "step": "10s",
         "titleFormat": "{{alertname}}",
-        "textFormat": "{{severity}} {{queue}}"
+        "textFormat": "{{severity}} · {{qmgr}} {{queue}}"
       }
     ]
   },
   "links": [
     {
-      "title": "IBM MQ folder",
-      "type": "dashboards",
-      "tags": [
-        "ibmmq"
-      ],
-      "asDropdown": true
+      "title": "Unified",
+      "type": "link",
+      "url": "/d/ibmmq-unified",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Queues & channels",
+      "type": "link",
+      "url": "/d/ibmmq-queues",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "SLO burn",
+      "type": "link",
+      "url": "/d/ibmmq-slo-burn",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ],
   "panels": [
     {
       "id": 1,
+      "type": "text",
+      "title": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "QMgr process up",
-      "description": "binds_to: slis.qmgr_process_up",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "### IBM MQ · Overview\nThe eight pack SLIs at a glance, the last certification's MTTD and MTTR, and the signals behind them. &nbsp;·&nbsp; pack `ibmmq@0.2.0` &nbsp;·&nbsp; [Unified](/d/ibmmq-unified?${__url_time_range}) · **Overview** · [Queues & channels](/d/ibmmq-queues?${__url_time_range}) · [SLO burn](/d/ibmmq-slo-burn?${__url_time_range})",
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Process up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "5-minute fraction of scrapes in which the queue manager's native metrics endpoint answered. SLO 99.9 % over 30 d.",
+      "pack": {
+        "binds_to": [
+          "slis.qmgr_process_up"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:qmgr_process_up:ratio_5m",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -74,19 +145,22 @@
           "unit": "percentunit",
           "decimals": 2,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.99
               },
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": 0.999
               }
             ]
@@ -102,31 +176,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 2,
+      "id": 3,
+      "type": "stat",
+      "title": "Reachable",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "QMgr reachable",
-      "description": "binds_to: slis.qmgr_reachability",
       "gridPos": {
-        "x": 4,
-        "y": 0,
-        "w": 4,
+        "x": 3,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "5-minute fraction of samples in which an MQ client (the exporter over DEV.ADMIN.SVRCONN) saw the queue manager RUNNING. Diverges from \"process up\" on listener, channel, CHLAUTH or CONNAUTH faults.",
+      "pack": {
+        "binds_to": [
+          "slis.qmgr_reachability"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:qmgr_reachability:ratio_5m",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -134,19 +219,22 @@
           "unit": "percentunit",
           "decimals": 2,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.99
               },
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": 0.999
               }
             ]
@@ -162,50 +250,65 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 3,
+      "id": 4,
+      "type": "stat",
+      "title": "Queue headroom",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Queue headroom (max)",
-      "description": "binds_to: slis.queue_depth_headroom",
       "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 4,
+        "x": 6,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "Highest depth / MAXDEPTH across application queues. 100 % means producers get MQRC_Q_FULL (2053).",
+      "pack": {
+        "binds_to": [
+          "slis.queue_depth_headroom"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "max(ibmmq:queue_depth_headroom:ratio)",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
+          "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.8
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 1
               }
             ]
@@ -221,50 +324,65 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 4,
+      "id": 5,
+      "type": "stat",
+      "title": "Oldest message",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Oldest message age",
-      "description": "binds_to: slis.oldest_message_age",
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 4,
+        "x": 9,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "Age of the oldest message on any application queue (DLQ excluded). Consumer health.",
+      "pack": {
+        "binds_to": [
+          "slis.oldest_message_age"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "max(ibmmq:oldest_message_age:seconds_max)",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "decimals": 0,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 60
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 120
               }
             ]
@@ -280,50 +398,65 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 5,
+      "id": 6,
+      "type": "stat",
+      "title": "DLQ depth",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "DLQ depth",
-      "description": "binds_to: slis.dlq_depth",
       "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
+        "x": 12,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "Messages on the queue manager's dead-letter queue (APP.DLQ).",
+      "pack": {
+        "binds_to": [
+          "slis.dlq_depth"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:dlq_depth:max",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "decimals": 0,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 1
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 10
               }
             ]
@@ -339,31 +472,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 6,
+      "id": 7,
+      "type": "stat",
+      "title": "Canary success",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Canary success (5m)",
-      "description": "binds_to: slis.canary_success",
       "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
+        "x": 15,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "5-minute success ratio of the synthetic put→get probe on APP.CANARY (matching payload within 5 s).",
+      "pack": {
+        "binds_to": [
+          "slis.canary_success"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:canary_success:ratio_5m",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -371,19 +515,22 @@
           "unit": "percentunit",
           "decimals": 2,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.99
               },
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": 0.999
               }
             ]
@@ -399,51 +546,65 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 7,
+      "id": 8,
+      "type": "stat",
+      "title": "Canary p99",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Canary p99 RTT",
-      "description": "binds_to: slis.canary_roundtrip_p99",
       "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 4,
+        "x": 18,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "p99 put→get round-trip of successful probes over 5 minutes (connect time excluded).",
+      "pack": {
+        "binds_to": [
+          "slis.canary_roundtrip_p99"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:canary_roundtrip:p99_5m",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "decimals": 3,
+          "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.5
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 1
               }
             ]
@@ -459,51 +620,65 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 8,
+      "id": 9,
+      "type": "stat",
+      "title": "Log write latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Log write latency",
-      "description": "binds_to: slis.log_write_latency",
       "gridPos": {
-        "x": 4,
-        "y": 4,
-        "w": 4,
+        "x": 21,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "Recovery-log write latency reported by the queue manager. Persistent-message throughput depends on it.",
+      "pack": {
+        "binds_to": [
+          "slis.log_write_latency"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:log_write_latency:seconds",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "decimals": 4,
+          "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 0.02
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 0.05
               }
             ]
@@ -519,31 +694,468 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 9,
+      "id": 10,
+      "type": "stat",
+      "title": "Last certification",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "SLO burn 1h · process up",
-      "description": "binds_to: slos.qmgr_process_up_99_9",
       "gridPos": {
-        "x": 8,
-        "y": 4,
+        "x": 0,
+        "y": 6,
         "w": 4,
         "h": 4
+      },
+      "description": "Verdict of the last `npm run certify` published to the alert-sink: PASS, WARN, FAIL or ERROR.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(mq_cert_verdict_code{job=\"certification\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "PASS",
+                  "color": "#3DD68C"
+                },
+                "1": {
+                  "text": "WARN",
+                  "color": "#F5B14C"
+                },
+                "2": {
+                  "text": "FAIL",
+                  "color": "#F0616D"
+                },
+                "3": {
+                  "text": "ERROR",
+                  "color": "#F0616D"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Certified",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "When the last certification run finished.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(mq_cert_run_timestamp_seconds{job=\"certification\"}) * 1000",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeFromNow",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8B98A9",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "MTTD p50",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Median time from fault injection to the alert webhook, across every expected alert of the chaos suite. Baseline p50 1 min (pack spec.baselines).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(mq_cert_mttd_quantile_seconds{job=\"certification\", quantile=\"0.5\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: s",
+          "decimals": 1,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 60
+              },
+              {
+                "color": "#F0616D",
+                "value": 120
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "MTTD p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "95th percentile time to detect. Baseline p95 2 min.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(mq_cert_mttd_quantile_seconds{job=\"certification\", quantile=\"0.95\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: s",
+          "decimals": 1,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 120
+              },
+              {
+                "color": "#F0616D",
+                "value": 240
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "MTTR p50 · resolution",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Median time from the recovery action to the resolved webhook: the observability system's share of MTTR (it excludes the human/automation fix time). Baseline MTTR p50 15 min.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(mq_cert_mttr_quantile_seconds{job=\"certification\", quantile=\"0.5\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: s",
+          "decimals": 1,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 900
+              },
+              {
+                "color": "#F0616D",
+                "value": 2700
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Symptom alerts firing",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Symptom alerts currently firing (burn-rate and forecast alerts excluded).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate=\"\", kind=\"\"}) or vector(0)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Burn 1 h · process up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Process up · 99.9 %",
+      "pack": {
+        "binds_to": [
+          "slos.qmgr_process_up_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"qmgr_process_up_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -551,19 +1163,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -579,31 +1194,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 10,
+      "id": 18,
+      "type": "stat",
+      "title": "Burn 1 h · canary success",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "SLO burn 1h · canary",
-      "description": "binds_to: slos.canary_success_99_9",
       "gridPos": {
-        "x": 12,
-        "y": 4,
+        "x": 4,
+        "y": 10,
         "w": 4,
         "h": 4
+      },
+      "description": "Canary success · 99.9 %",
+      "pack": {
+        "binds_to": [
+          "slos.canary_success_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"canary_success_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -611,19 +1237,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -639,41 +1268,52 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 11,
+      "id": 19,
+      "type": "stat",
+      "title": "Connections",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Connections",
       "gridPos": {
-        "x": 16,
-        "y": 4,
+        "x": 8,
+        "y": 10,
         "w": 4,
         "h": 4
       },
+      "description": "Open connections to the queue manager (client view).",
       "targets": [
         {
           "refId": "A",
           "expr": "max(ibmmq_qmgr_connection_count{job=\"ibmmq-exporter\"})",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "decimals": 0,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#8B98A9",
                 "value": null
               }
             ]
@@ -689,83 +1329,103 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 12,
+      "id": 20,
+      "type": "state-timeline",
+      "title": "Symptom alerts · pending / firing",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Firing pack alerts",
       "gridPos": {
-        "x": 20,
-        "y": 4,
-        "w": 4,
+        "x": 12,
+        "y": 10,
+        "w": 12,
         "h": 4
       },
+      "description": "State of every symptom alert of the pack over the time range.",
       "targets": [
         {
           "refId": "A",
-          "expr": "count(ALERTS{alertstate=\"firing\", pack=\"ibmmq\"}) or vector(0)",
-          "instant": true
+          "expr": "(2 * max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"firing\", burn_rate=\"\", kind=\"\"})) or max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"pending\", burn_rate=\"\", kind=\"\"}) or label_replace(vector(0), \"alertname\", \"no alert\", \"\", \"\")",
+          "legendFormat": "{{alertname}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 1
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4B5563"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "quiet",
+                  "color": "#1E3A34"
+                },
+                "1": {
+                  "text": "PENDING",
+                  "color": "#F5B14C"
+                },
+                "2": {
+                  "text": "FIRING",
+                  "color": "#F0616D"
+                }
               }
-            ]
+            }
+          ],
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 78
           }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "center",
+        "rowHeight": 0.82,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       }
     },
     {
-      "id": 13,
+      "id": 22,
+      "type": "timeseries",
+      "title": "Availability · process vs reachability",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Availability: process vs reachability",
-      "description": "binds_to: slis.qmgr_process_up",
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 14,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.qmgr_process_up"
+        ]
       },
       "targets": [
         {
@@ -784,18 +1444,82 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 0.999
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "process up (native :9157)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3DD68C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reachable (client exporter)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5B8DEF"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -804,24 +1528,28 @@
       }
     },
     {
-      "id": 14,
+      "id": 23,
+      "type": "timeseries",
+      "title": "Canary round-trip · p50 / p99",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Canary round-trip (p50 / p99)",
-      "description": "binds_to: slis.canary_roundtrip_p99",
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 14,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.canary_roundtrip_p99"
+        ]
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.5, sum by (le)(rate(mq_canary_roundtrip_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le)(rate(mq_canary_roundtrip_duration_seconds_bucket{result=\"ok\"}[5m])))",
           "legendFormat": "p50"
         },
         {
@@ -833,18 +1561,82 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F0616D",
+                "value": 0.5
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5B8DEF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F5B14C"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -853,19 +1645,23 @@
       }
     },
     {
-      "id": 15,
+      "id": 24,
+      "type": "timeseries",
+      "title": "Queue depth headroom by queue",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Queue depth headroom by queue",
-      "description": "binds_to: slis.queue_depth_headroom",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 21,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.queue_depth_headroom"
+        ]
       },
       "targets": [
         {
@@ -879,18 +1675,58 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 0.8
+              },
+              {
+                "color": "#F0616D",
+                "value": 1
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -899,19 +1735,23 @@
       }
     },
     {
-      "id": 16,
+      "id": 25,
+      "type": "timeseries",
+      "title": "Oldest message age by queue",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Oldest message age by queue",
-      "description": "binds_to: slis.oldest_message_age",
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 21,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.oldest_message_age"
+        ]
       },
       "targets": [
         {
@@ -923,18 +1763,54 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 60
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -943,19 +1819,23 @@
       }
     },
     {
-      "id": 17,
+      "id": 26,
+      "type": "timeseries",
+      "title": "Canary attempts by result",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Canary attempts by result",
-      "description": "binds_to: slis.canary_success",
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 28,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.canary_success"
+        ]
       },
       "targets": [
         {
@@ -967,18 +1847,183 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3DD68C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "get_timeout"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F5B14C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "connect_failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0616D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "payload_mismatch"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F472B6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "put_failed_q_full"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "auth_failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0616D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "handle_invalid"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F5B14C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message_too_large"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0616D"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -987,18 +2032,18 @@
       }
     },
     {
-      "id": 18,
+      "id": 27,
+      "type": "timeseries",
+      "title": "Orders flow · produced vs consumed",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Orders flow: produced vs consumed",
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 28,
         "w": 12,
-        "h": 8
+        "h": 7
       },
       "targets": [
         {
@@ -1020,18 +2065,93 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "produced/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5B8DEF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "consumed/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3DD68C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "put errors/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0616D"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -1040,19 +2160,23 @@
       }
     },
     {
-      "id": 19,
+      "id": 28,
+      "type": "timeseries",
+      "title": "Recovery log write latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Recovery log write latency",
-      "description": "binds_to: slis.log_write_latency",
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 35,
         "w": 12,
-        "h": 8
+        "h": 7
+      },
+      "pack": {
+        "binds_to": [
+          "slis.log_write_latency"
+        ]
       },
       "targets": [
         {
@@ -1064,18 +2188,67 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 0.02
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -1084,51 +2257,128 @@
       }
     },
     {
-      "id": 20,
+      "id": 29,
+      "type": "timeseries",
+      "title": "Queue manager · CPU and filesystem",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "QMgr CPU / filesystem",
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 35,
         "w": 12,
-        "h": 8
+        "h": 7
       },
       "targets": [
         {
           "refId": "A",
           "expr": "max by (qmgr)(ibmmq_qmgr_user_cpu_time_percentage{job=\"ibmmq-exporter\"})",
-          "legendFormat": "user cpu %"
+          "legendFormat": "user cpu"
         },
         {
           "refId": "B",
           "expr": "max by (qmgr)(ibmmq_qmgr_system_cpu_time_percentage{job=\"ibmmq-exporter\"})",
-          "legendFormat": "system cpu %"
+          "legendFormat": "system cpu"
         },
         {
           "refId": "C",
           "expr": "min by (qmgr)(ibmmq_qmgr_queue_manager_file_system_free_space_percentage{job=\"ibmmq-exporter\"})",
-          "legendFormat": "fs free %"
+          "legendFormat": "filesystem free"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user cpu"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5B8DEF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "system cpu"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "filesystem free"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3DD68C"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -1137,19 +2387,20 @@
       }
     },
     {
-      "id": 21,
+      "id": 30,
+      "type": "logs",
+      "title": "Queue manager log",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
-      "type": "logs",
-      "title": "Queue manager log (Loki; MQ message id + text)",
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 42,
         "w": 24,
         "h": 8
       },
+      "description": "MQ console log (AMQ message id + text), parsed by the collector.",
       "targets": [
         {
           "refId": "A",
@@ -1158,7 +2409,11 @@
       ],
       "options": {
         "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
         "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
         "dedupStrategy": "none",
         "sortOrder": "Descending"
       }
