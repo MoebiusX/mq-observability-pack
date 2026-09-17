@@ -440,11 +440,11 @@ spec:
         interval: 30s
         labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
-        expr: '(((sum(increase(mq_canary_attempts_total[5m]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[5m])) or vector(0)))) / 30) / 0.001'
+        expr: '(((sum(increase(mq_canary_attempts_total[5m]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[5m])) or vector(0)))) / clamp_min((sum(increase(mq_canary_attempts_total[5m]))), 1)) / 0.001'
         interval: 30s
         labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
       - name: ibmmq:errorbudget:burn_1h
-        expr: '(((sum(increase(mq_canary_attempts_total[1h]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)))) / 360) / 0.001'
+        expr: '(((sum(increase(mq_canary_attempts_total[1h]))) - ((sum(increase(mq_canary_attempts_total{result="ok"}[1h])) or vector(0)))) / clamp_min((sum(increase(mq_canary_attempts_total[1h]))), 1)) / 0.001'
         interval: 30s
         labels: { slo: canary_success_99_9, sli: canary_success, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
