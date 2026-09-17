@@ -20,6 +20,10 @@ npm test                        # node --check on 4 entrypoints + pack schema va
 node tools/check-rules.mjs      # pack <-> rules <-> dashboards cross-check
 npm run validate                # validate-pack + docker compose config + check-rules
 npm run generate                # regenerate dashboards + stack/prometheus/rules/ibmmq.burn.yml from the pack; CI fails on a non-empty git diff
+npm run site                    # render the lab from sites/lab.inventory.yaml into sites/lab/ (tools/test-site.mjs T10: byte-identical to stack/)
+npm run site:check              # render every environment of sites/fleet-example.inventory.yaml, --check --strict, write nothing
+node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env all --out /tmp/sites   # one partition per environment
+node tools/check-rules.mjs --site /tmp/sites/prod/site.json                                       # the cross-check on a rendered partition
 promtool check config stack/prometheus/prometheus.yml && promtool check rules stack/prometheus/rules/*.yml
 ENV=lab MQ_QMGR_NAME=QM1 otelcol-contrib validate --config stack/otelcol/config.yaml   # config uses ${env:...}
 amtool check-config stack/alertmanager/alertmanager.yml
@@ -72,6 +76,15 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
    `stack/grafana/dashboards/*.json` or `stack/prometheus/rules/ibmmq.burn.yml`. When
    the generated recording rules change, paste `node tools/gen-burn-rules.mjs
    --pack-snippet` into `spec.queries.recording_rules` (check-rules compares them).
+   **The lab is a rendered site.** The recording, alert and inventory rules, the promtool tests,
+   the collector, Prometheus, Alertmanager, datasource and exporter files under `stack/` are what
+   `tools/site/templates/*.mjs` render from `sites/lab.inventory.yaml` (`npm run site`);
+   `tools/test-site.mjs` T10 fails when a stack file and its rendering differ. To change one,
+   edit the template (the lab literal stays the default; fleet-only blocks are guarded by
+   conditions false for the lab) or the inventory, render, copy the file into `stack/`, and
+   restart the service that reads it. Anchors in `tools/site/ibmmq.mjs packSubstitutions` are
+   exact-count: a pack edit that changes how often `[30s]` or `queue=~"APP.*"` occurs must update
+   the count there.
 3. **No new npm dependencies in `harness/`** (Node >= 20 built-ins only). `canary/`
    may depend on `ibmmq` and `@opentelemetry/*` only.
 4. **Vendored code is read-only**: `vendor/observogram/` is refreshed by copying
