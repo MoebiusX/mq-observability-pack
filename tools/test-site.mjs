@@ -320,34 +320,43 @@ const composeCanaryEnv = () => {
   return out;
 };
 
-test('T10 templates: recording, alert, promtool-test, datasource and exporter files are byte-identical to stack/', () => {
+// The lab is a rendered site: every generated file with a twin under stack/ is byte-identical.
+// (The transition commit brought the collector, Prometheus and Alertmanager files to their
+// rendering: target labels environment/site/shape, literal resource attributes, the remote-write
+// and Prometheus external label environment=lab, the environment matcher on the SEV1 route, and
+// the new inventory rules file; each was validated statically and the lab recertified live.)
+const LAB_TWINS = [
+  ['prometheus/prometheus.yml', 'stack/prometheus/prometheus.yml'],
+  ['prometheus/rules/ibmmq.recording.yml', 'stack/prometheus/rules/ibmmq.recording.yml'],
+  ['prometheus/rules/ibmmq.alerts.yml', 'stack/prometheus/rules/ibmmq.alerts.yml'],
+  ['prometheus/rules/ibmmq.inventory.yml', 'stack/prometheus/rules/ibmmq.inventory.yml'],
+  ['prometheus/tests/ibmmq.alerts.test.yml', 'stack/prometheus/tests/ibmmq.alerts.test.yml'],
+  ['otelcol/config.yaml', 'stack/otelcol/config.yaml'],
+  ['alertmanager/alertmanager.yml', 'stack/alertmanager/alertmanager.yml'],
+  ['grafana/provisioning/datasources/datasources.yaml', 'stack/grafana/provisioning/datasources/datasources.yaml'],
+  ['qmgrs/QM1/mq_prometheus.yaml', 'stack/mq-exporter/mq_prometheus.yaml'],
+];
+test('T10 templates: every rendered lab file with a stack twin is byte-identical to stack/', () => {
   const lab = labRun().partitions.lab;
-  for (const [g, s] of [
-    ['prometheus/rules/ibmmq.recording.yml', 'stack/prometheus/rules/ibmmq.recording.yml'],
-    ['prometheus/rules/ibmmq.alerts.yml', 'stack/prometheus/rules/ibmmq.alerts.yml'],
-    ['prometheus/tests/ibmmq.alerts.test.yml', 'stack/prometheus/tests/ibmmq.alerts.test.yml'],
-    ['grafana/provisioning/datasources/datasources.yaml', 'stack/grafana/provisioning/datasources/datasources.yaml'],
-    ['qmgrs/QM1/mq_prometheus.yaml', 'stack/mq-exporter/mq_prometheus.yaml'],
-  ]) assert.equal(fileOf(lab, g), rd(s), g);
+  for (const [g, s] of LAB_TWINS) assert.equal(fileOf(lab, g), rd(s), g);
   assert.deepEqual(lab.manifest.skipped ?? [], [], 'every template applies to the lab');
 });
 
-test('T10 templates: the collector, Prometheus and Alertmanager files deviate from stack/ by exactly the environment wiring', () => {
+test('T10 templates: the environment wiring the lab carries (what the transition added, now asserted on stack/)', () => {
   const lab = labRun().partitions.lab;
-  assert.equal(fileOf(lab, 'prometheus/prometheus.yml'), expectDeviation(rd('stack/prometheus/prometheus.yml'), [
-    ['    lab: mq-obs\n', '    lab: mq-obs\n    environment: lab\n'],
-  ]));
-  assert.equal(fileOf(lab, 'alertmanager/alertmanager.yml'), expectDeviation(rd('stack/alertmanager/alertmanager.yml'), [
-    ['- matchers: [ severity = SEV1 ]', '- matchers: [ environment = "lab", severity = SEV1 ]'],
-  ]));
-  assert.equal(fileOf(lab, 'otelcol/config.yaml'), expectDeviation(rd('stack/otelcol/config.yaml'), [
-    ['labels: { qmgr: "${env:MQ_QMGR_NAME}", source: native }', 'labels: { qmgr: "QM1", environment: lab, site: lab, shape: container, source: native }'],
-    ['labels: { source: exporter }', 'labels: { environment: lab, site: lab, shape: container, source: exporter }'],
-    ['- targets: [ "alert-sink:9095" ]\n', '- targets: [ "alert-sink:9095" ]\n              labels: { environment: lab }\n'],
-    ['value: "${env:ENV}"', 'value: "lab"'],
-    ['value: "${env:MQ_QMGR_NAME}"', 'value: "QM1"'],
-    ['    external_labels:\n      service: ibmmq\n', '    external_labels:\n      service: ibmmq\n      environment: lab\n'],
-  ]));
+  const otel = fileOf(lab, 'otelcol/config.yaml');
+  for (const needle of [
+    'labels: { qmgr: "QM1", environment: lab, site: lab, shape: container, source: native }',
+    'labels: { environment: lab, site: lab, shape: container, source: exporter }',
+    '- targets: [ "alert-sink:9095" ]\n              labels: { environment: lab }\n',
+    '{ key: deployment.environment, value: "lab", action: upsert }',
+    '{ key: mq.qmgr.name,           value: "QM1", action: upsert }',
+    '    external_labels:\n      service: ibmmq\n      environment: lab\n',
+  ]) assert.equal(countMatches(otel, needle), 1, needle);
+  assert.ok(!otel.includes('${env:'), 'no compose-time placeholders: the rendering is literal');
+  assert.ok(fileOf(lab, 'prometheus/prometheus.yml').includes('  external_labels:\n    lab: mq-obs\n    environment: lab\n'));
+  assert.ok(fileOf(lab, 'alertmanager/alertmanager.yml').includes('- matchers: [ environment = "lab", severity = SEV1 ]'));
+  void expectDeviation;
 });
 
 test('T10 templates: canary.env equals the compose &canary_env block key by key; the new files carry the lab inventory', () => {
@@ -436,6 +445,42 @@ test('T9 templates (vantage single): the degraded rule set, the inventory join, 
   assert.ok(exporter.includes('    - "SYSTEM.DEAD.LETTER.QUEUE"\n') && !exporter.includes('"!SYSTEM.*"'), 'a SYSTEM.* DEADQ is listed and not excluded');
   const canary = fileOf(p, 'qmgrs/QMORDS/canary.env');
   assert.ok(canary.includes('MQ_CCDT_URL=file:///etc/mq/ccdt/QMORDS.json') && canary.includes('MQ_KEY_REPOSITORY=/etc/mq/tls/mqmon') && !canary.includes('ORDERS_QUEUE='));
+});
+
+// ----------------------------------------------------------------- T11 check-rules --site; site-aware boards
+test('T11 check-rules --site is green on the lab partition and on every partition of the fleet example', () => {
+  const out = mkdtempSync(join(tmpdir(), 'mq-site-'));
+  try {
+    assert.equal(cli('--inventory', 'sites/lab.inventory.yaml', '--env', 'lab', '--out', join(out, 'lab-rt')).status, 0);
+    assert.equal(cli('--inventory', 'sites/fleet-example.inventory.yaml', '--env', 'all', '--out', join(out, 'fleet')).status, 0);
+    for (const site of [join(out, 'lab-rt', 'lab', 'site.json'), join(out, 'fleet', 'prod', 'site.json'), join(out, 'fleet', 'staging', 'site.json')]) {
+      const r = spawnSync(process.execPath, [resolve(ROOT, 'tools/check-rules.mjs'), '--site', site], { cwd: ROOT, encoding: 'utf8' });
+      assert.equal(r.status, 0, `${site}\n${r.stderr}${r.stdout}`);
+      assert.match(r.stdout, /cross-checked against the pack/);
+    }
+  } finally { rmSync(out, { recursive: true, force: true }); }
+});
+
+test('boards follow the site: no native job or process panels for a single vantage; delta estimator and exporter names for non-container; lab names otherwise', () => {
+  const r = fleetAll();
+  const staging = r.partitions.staging, prod = r.partitions.prod;
+  for (const f of ['ibmmq-unified', 'ibmmq-overview', 'ibmmq-queues', 'ibmmq-slo-burn']) {
+    const text = fileOf(staging, `grafana/dashboards/${f}.json`);
+    assert.equal(countMatches(text, 'ibmmq-native'), 0, `${f}: nothing reads the native job`);
+    assert.equal(countMatches(text, 'qmgr_process_up'), 0, `${f}: no process SLI/SLO panel`);
+  }
+  const unified = JSON.parse(fileOf(prod, 'grafana/dashboards/ibmmq-unified.json'));
+  const exprs = unified.panels.flatMap(p => (p.targets || []).map(t => t.expr)).filter(Boolean);
+  assert.ok(exprs.some(e => e.includes('sum_over_time(ibmmq_qmgr_interval_mqput_mqput1_total_count{job="ibmmq-native"}[2m]) / 120')), 'non-container: the exporter delta name and estimator on the native job');
+  assert.ok(!exprs.some(e => /ibmmq_qmgr_[a-z_]+_total\{/.test(e)), 'non-container: no _total counter is read (the local exporter has none)');
+  assert.ok(exprs.some(e => e.includes('ibmmq_qmgr_log_current_primary_space_in_use_percentage{job="ibmmq-native"}')) && exprs.some(e => e.includes('100 * ibmmq_qmgr_log_file_system_free_space_bytes{job="ibmmq-native"} / ibmmq_qmgr_log_file_system_max_bytes{job="ibmmq-native"}')), 'non-container: the two renamed gauges');
+  assert.equal(unified.title, 'IBM MQ — Unified Observability · prod');
+  assert.ok(JSON.stringify(unified).includes('over MON.SVRCONN'), 'descriptions name the site\'s monitoring channel');
+  assert.ok(!JSON.stringify(unified).includes('APP.ORDERS.REQ') && !JSON.stringify(unified).includes('Orders produced'), 'no orders panels when orders_queue is null');
+  const stagingUnified = JSON.parse(fileOf(staging, 'grafana/dashboards/ibmmq-unified.json'));
+  const stagingExprs = stagingUnified.panels.flatMap(p => (p.targets || []).map(t => t.expr)).filter(Boolean);
+  assert.ok(stagingExprs.some(e => e.includes('sum_over_time(ibmmq_qmgr_commit_count{job="ibmmq-exporter"}[2m]) / 120')), 'single vantage: the queue manager counters come from the exporter job');
+  assert.ok(!stagingUnified.panels.some(p => p.title === 'Native endpoint'));
 });
 
 test('T4 templates (prod, step 30): every window, for:, damping and interval follows the timing model', () => {
