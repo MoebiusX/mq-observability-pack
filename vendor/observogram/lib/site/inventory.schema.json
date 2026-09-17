@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://observogram.dev/schemas/site-inventory-v1.json",
+  "title": "Site inventory v1",
+  "description": "One inventory file of a fleet (gen-site). Written against the JSON Schema 2020-12 subset tools/lib/validator.mjs implements (type, const, enum, pattern, required, properties, additionalProperties, propertyNames, items, minItems, $ref to local $defs). The three *Params definitions are placeholders: inventorySchema(module) replaces them with module.paramsSchema.{site,host,instance} at load time.",
+  "type": "object",
+  "required": ["inventory"],
+  "additionalProperties": false,
+  "properties": {
+    "inventory": { "type": "string", "const": "v1" },
+    "env": { "$ref": "#/$defs/EnvName" },
+    "pack": { "type": "string", "minLength": 1 },
+    "environments": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/EnvName" },
+      "additionalProperties": { "$ref": "#/$defs/Environment" }
+    },
+    "hosts": { "type": "array", "items": { "$ref": "#/$defs/Host" } },
+    "queue_managers": { "type": "array", "items": { "$ref": "#/$defs/QueueManager" } }
+  },
+  "$defs": {
+    "EnvName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "Name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "Duration": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+    "Port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "Environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scrape_interval": { "$ref": "#/$defs/Duration" },
+        "vantage": { "type": "string", "enum": ["single", "dual"] },
+        "profile": { "type": "string", "enum": ["container", "non-container"] },
+        "endpoints": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "remote_write": { "type": "string", "minLength": 1 },
+            "loki": { "type": "string", "minLength": 1 },
+            "tempo": { "type": "string", "minLength": 1 },
+            "alertmanager": { "type": "string", "minLength": 1 },
+            "alert_sink": { "type": "string", "minLength": 1 },
+            "otlp": { "type": "string", "minLength": 1 },
+            "grafana": { "type": "string", "minLength": 1 }
+          }
+        },
+        "receivers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sev1": { "type": "string", "minLength": 1 },
+            "sev2": { "type": "string", "minLength": 1 },
+            "sev3": { "type": "string", "minLength": 1 }
+          }
+        },
+        "secrets": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+        "repo_url": { "type": "string", "minLength": 1 },
+        "rule_labels": { "type": "boolean" },
+        "params": { "$ref": "#/$defs/siteParams" }
+      }
+    },
+    "Host": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/Name" },
+        "env": { "$ref": "#/$defs/EnvName" },
+        "site": { "type": "string", "minLength": 1 },
+        "roles": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "params": { "$ref": "#/$defs/hostParams" }
+      }
+    },
+    "QueueManager": {
+      "type": "object",
+      "required": ["name", "shape"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/Name" },
+        "env": { "$ref": "#/$defs/EnvName" },
+        "shape": { "type": "string", "enum": ["container", "host", "multi-instance", "rdqm-ha", "rdqm-dr"] },
+        "hosts": { "type": "array", "items": { "$ref": "#/$defs/Name" } },
+        "address": {
+          "type": "object",
+          "required": ["host", "port"],
+          "additionalProperties": false,
+          "properties": {
+            "host": { "type": "string", "minLength": 1 },
+            "port": { "$ref": "#/$defs/Port" }
+          }
+        },
+        "exporter_host": { "$ref": "#/$defs/Name" },
+        "params": { "$ref": "#/$defs/instanceParams" }
+      }
+    },
+    "siteParams": { "type": "object" },
+    "hostParams": { "type": "object" },
+    "instanceParams": { "type": "object" }
+  }
+}
