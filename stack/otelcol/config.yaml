@@ -40,6 +40,10 @@ receivers:
         - job_name: otel-collector
           static_configs:
             - targets: [ "127.0.0.1:8888" ]
+        - job_name: certification            # harness results published to the alert-sink: MTTD/MTTR/verdict on the boards
+          scrape_interval: 30s
+          static_configs:
+            - targets: [ "alert-sink:9095" ]
 
   filelog:
     include: [ /var/lib/docker/containers/*/*-json.log ]

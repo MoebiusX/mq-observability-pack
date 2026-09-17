@@ -297,6 +297,13 @@ spec:
             scrape_interval: 10s
             static_configs:
               - targets: [mq-exporter:9157]
+          # The harness publishes each certification run to the alert-sink (/results) and the
+          # sink exposes it as mq_cert_* (verdict, checks, MTTD and MTTR per alert), so the
+          # dashboards show detection and resolution times next to the SLOs they validate.
+          - job_name: certification
+            scrape_interval: 30s
+            static_configs:
+              - targets: [alert-sink:9095]
       - name: filelog
         include: [/var/lib/docker/containers/*/*-json.log]
         format: ibm-mq-console-json
