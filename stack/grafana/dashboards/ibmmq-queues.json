@@ -1,6 +1,7 @@
 {
   "uid": "ibmmq-queues",
   "title": "IBM MQ — Queues & Channels",
+  "description": "IBM MQ queues and channels in detail.",
   "tags": [
     "ibmmq",
     "pack"
@@ -10,9 +11,21 @@
   "version": 1,
   "editable": true,
   "graphTooltip": 1,
-  "refresh": "10s",
+  "liveNow": false,
+  "refresh": "30s",
+  "fiscalYearStartMonth": 0,
+  "weekStart": "",
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
   "time": {
-    "from": "now-30m",
+    "from": "now-1h",
     "to": "now"
   },
   "templating": {
@@ -21,45 +34,175 @@
   "annotations": {
     "list": [
       {
-        "name": "Pack alerts",
+        "name": "Symptom alerts",
         "datasource": {
           "type": "prometheus",
           "uid": "prom"
         },
         "enable": true,
-        "iconColor": "#d03b3b",
-        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\"}",
+        "hide": false,
+        "iconColor": "#F0616D",
+        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate=\"\", kind=\"\"}",
         "step": "10s",
         "titleFormat": "{{alertname}}",
-        "textFormat": "{{severity}} {{queue}}"
+        "textFormat": "{{severity}} · {{qmgr}} {{queue}}"
       }
     ]
   },
   "links": [
     {
-      "title": "IBM MQ folder",
-      "type": "dashboards",
-      "tags": [
-        "ibmmq"
-      ],
-      "asDropdown": true
+      "title": "Unified",
+      "type": "link",
+      "url": "/d/ibmmq-unified",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Overview",
+      "type": "link",
+      "url": "/d/ibmmq-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "SLO burn",
+      "type": "link",
+      "url": "/d/ibmmq-slo-burn",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ],
   "panels": [
     {
       "id": 1,
+      "type": "text",
+      "title": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Depth by queue",
-      "description": "binds_to: ref:queries.per_queue_depth",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 12,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "### IBM MQ · Queues & channels\nPer-queue depth, headroom, age, throughput and handles; channel state and traffic. &nbsp;·&nbsp; pack `ibmmq@0.2.0` &nbsp;·&nbsp; [Unified](/d/ibmmq-unified?${__url_time_range}) · [Overview](/d/ibmmq-overview?${__url_time_range}) · **Queues & channels** · [SLO burn](/d/ibmmq-slo-burn?${__url_time_range})",
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Headroom by queue · depth / MAXDEPTH",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 8,
         "h": 8
+      },
+      "description": "Current depth as a fraction of MAXDEPTH per application queue.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ibmmq:queue_depth_headroom:ratio",
+          "instant": true,
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 0.8
+              },
+              {
+                "color": "#F0616D",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 14,
+        "maxVizHeight": 26,
+        "legend": {
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Depth by queue",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 2,
+        "w": 8,
+        "h": 8
+      },
+      "description": "Current depth per queue (exporter, 10 s publications).",
+      "pack": {
+        "binds_to": [
+          "ref:queries.per_queue_depth"
+        ]
       },
       "targets": [
         {
@@ -71,105 +214,47 @@
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 2,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "MAXDEPTH by queue",
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "ibmmq_queue_attribute_max_depth{job=\"ibmmq-exporter\"}",
-          "legendFormat": "{{queue}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 3,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "Put rate by queue",
-      "description": "binds_to: ref:queries.per_queue_throughput",
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqput_mqput1_count{job=\"ibmmq-exporter\"}[2m])) / 120",
-          "legendFormat": "{{queue}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -179,59 +264,16 @@
     },
     {
       "id": 4,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "Get rate by queue",
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqget_count{job=\"ibmmq-exporter\"}[2m])) / 120",
-          "legendFormat": "{{queue}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 5,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
       "type": "timeseries",
       "title": "Oldest message age by queue",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
       "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
+        "x": 16,
+        "y": 2,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -244,18 +286,132 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 60
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Put rate by queue",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 7
+      },
+      "description": "MQPUT + MQPUT1 per second, from the exporter's per-interval counts (sum over 2 m ÷ 120 s).",
+      "pack": {
+        "binds_to": [
+          "ref:queries.per_queue_throughput"
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqput_mqput1_count{job=\"ibmmq-exporter\"}[2m])) / 120",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -265,18 +421,95 @@
     },
     {
       "id": 6,
+      "type": "timeseries",
+      "title": "Get rate by queue",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Queue time (short / long sample)",
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 10,
         "w": 12,
-        "h": 8
+        "h": 7
       },
+      "description": "MQGET per second, same estimator.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (queue)(sum_over_time(ibmmq_queue_mqget_count{job=\"ibmmq-exporter\"}[2m])) / 120",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Queue time · short / long sample",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Time messages spend on the queue (MQ QTIME short and long moving averages).",
       "targets": [
         {
           "refId": "A",
@@ -292,18 +525,50 @@
       "fieldConfig": {
         "defaults": {
           "unit": "µs",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -312,19 +577,20 @@
       }
     },
     {
-      "id": 7,
+      "id": 8,
+      "type": "timeseries",
+      "title": "Open handles · input / output",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Open handles (input / output)",
       "gridPos": {
-        "x": 0,
-        "y": 24,
+        "x": 12,
+        "y": 17,
         "w": 12,
-        "h": 8
+        "h": 7
       },
+      "description": "Applications with the queue open for input (getters) and output (putters).",
       "targets": [
         {
           "refId": "A",
@@ -340,18 +606,50 @@
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -360,19 +658,24 @@
       }
     },
     {
-      "id": 8,
+      "id": 9,
+      "type": "state-timeline",
+      "title": "Channel status",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Channel status (0 stopped · 1 transition · 2 running)",
-      "description": "binds_to: ref:queries.per_channel_status",
       "gridPos": {
-        "x": 12,
+        "x": 0,
         "y": 24,
         "w": 12,
-        "h": 8
+        "h": 6
+      },
+      "description": "Squashed channel status: RUNNING, TRANSITION (binding, starting, retrying, stopping) or INACTIVE / STOPPED.",
+      "pack": {
+        "binds_to": [
+          "ref:queries.per_channel_status"
+        ]
       },
       "targets": [
         {
@@ -383,85 +686,214 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "min": 0,
-          "max": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4B5563"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INACTIVE / STOPPED",
+                  "color": "#8B98A9"
+                },
+                "1": {
+                  "text": "TRANSITION",
+                  "color": "#F5B14C"
+                },
+                "2": {
+                  "text": "RUNNING",
+                  "color": "#3DD68C"
+                }
+              }
+            }
+          ],
           "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "lineWidth": 0,
+            "fillOpacity": 78
           }
         },
         "overrides": []
       },
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "center",
+        "rowHeight": 0.82,
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 9,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "Channel messages / s (per-interval deltas ÷ 120 s)",
-      "gridPos": {
-        "x": 0,
-        "y": 32,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m])) / 120",
-          "legendFormat": "{{channel}} msgs/s"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single",
+          "sort": "none"
         }
       }
     },
     {
       "id": 10,
+      "type": "timeseries",
+      "title": "Channel instances",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Native endpoint: commits / MQI calls (qmgr-level)",
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 24,
         "w": 12,
-        "h": 8
+        "h": 6
       },
+      "description": "Current instances per channel (one per client conversation for SVRCONN).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (channel)(ibmmq_channel_cur_inst{job=\"ibmmq-exporter\"})",
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Channel messages / s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 12,
+        "h": 6
+      },
+      "description": "Per-interval channel counts (DIS CHSTATUS MSGS deltas), sum over 2 m ÷ 120 s.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel)(sum_over_time(ibmmq_channel_messages{job=\"ibmmq-exporter\"}[2m])) / 120",
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Queue manager MQI · commits, puts, gets",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 30,
+        "w": 12,
+        "h": 6
+      },
+      "description": "Queue-manager-level MQI rates from the native endpoint (true counters, rate() is right here).",
       "targets": [
         {
           "refId": "A",
@@ -482,18 +914,93 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "commits/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mqput/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5B8DEF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "destructive get/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3DD68C"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
+          "showLegend": true,
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",

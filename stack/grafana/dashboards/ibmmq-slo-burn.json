@@ -1,6 +1,7 @@
 {
   "uid": "ibmmq-slo-burn",
   "title": "IBM MQ — SLO burn rates",
+  "description": "Multi-window burn rates and forecasts for every IBM MQ pack SLO.",
   "tags": [
     "ibmmq",
     "pack",
@@ -11,9 +12,21 @@
   "version": 1,
   "editable": true,
   "graphTooltip": 1,
-  "refresh": "10s",
+  "liveNow": false,
+  "refresh": "30s",
+  "fiscalYearStartMonth": 0,
+  "weekStart": "",
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
   "time": {
-    "from": "now-30m",
+    "from": "now-1h",
     "to": "now"
   },
   "templating": {
@@ -22,51 +35,109 @@
   "annotations": {
     "list": [
       {
-        "name": "Pack alerts",
+        "name": "Symptom alerts",
         "datasource": {
           "type": "prometheus",
           "uid": "prom"
         },
         "enable": true,
-        "iconColor": "#d03b3b",
-        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\"}",
+        "hide": false,
+        "iconColor": "#F0616D",
+        "expr": "ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate=\"\", kind=\"\"}",
         "step": "10s",
         "titleFormat": "{{alertname}}",
-        "textFormat": "{{severity}} {{queue}}"
+        "textFormat": "{{severity}} · {{qmgr}} {{queue}}"
       }
     ]
   },
   "links": [
     {
-      "title": "IBM MQ folder",
-      "type": "dashboards",
-      "tags": [
-        "ibmmq"
-      ],
-      "asDropdown": true
+      "title": "Unified",
+      "type": "link",
+      "url": "/d/ibmmq-unified",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Overview",
+      "type": "link",
+      "url": "/d/ibmmq-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "title": "Queues & channels",
+      "type": "link",
+      "url": "/d/ibmmq-queues",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ],
   "panels": [
     {
       "id": 1,
+      "type": "text",
+      "title": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "QMgr process up 99.9% · burn 1h",
-      "description": "binds_to: slos.qmgr_process_up_99_9",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "### IBM MQ · SLO burn rates\nError-budget burn per SLO on the fast and slow windows, and the burn-rate / forecast alert history. &nbsp;·&nbsp; pack `ibmmq@0.2.0` &nbsp;·&nbsp; [Unified](/d/ibmmq-unified?${__url_time_range}) · [Overview](/d/ibmmq-overview?${__url_time_range}) · [Queues & channels](/d/ibmmq-queues?${__url_time_range}) · **SLO burn**",
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Process up · burn 1 h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Process up · 99.9 % (objective 0.999 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.qmgr_process_up_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"qmgr_process_up_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -74,19 +145,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -102,31 +176,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 2,
+      "id": 3,
+      "type": "stat",
+      "title": "Reachable · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "QMgr reachable 99.9% · burn 1h",
-      "description": "binds_to: slos.qmgr_reachability_99_9",
       "gridPos": {
-        "x": 4,
-        "y": 0,
-        "w": 4,
+        "x": 3,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Reachable · 99.9 % (objective 0.999 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.qmgr_reachability_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"qmgr_reachability_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -134,19 +219,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -162,31 +250,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 3,
+      "id": 4,
+      "type": "stat",
+      "title": "Queue headroom · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Queue headroom 99.9% · burn 1h",
-      "description": "binds_to: slos.queue_headroom_99_9",
       "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 4,
+        "x": 6,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Queue headroom · 99.9 % (objective 0.999 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.queue_headroom_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"queue_headroom_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -194,19 +293,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -222,31 +324,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 4,
+      "id": 5,
+      "type": "stat",
+      "title": "Message age < 60 s · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Message age <60s 99% · burn 1h",
-      "description": "binds_to: slos.message_age_99_under_60s",
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 4,
+        "x": 9,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Message age < 60 s · 99 % (objective 0.99 over 7d).",
+      "pack": {
+        "binds_to": [
+          "slos.message_age_99_under_60s"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"message_age_99_under_60s\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -254,19 +367,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 4
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 10
               }
             ]
@@ -282,31 +398,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 5,
+      "id": 6,
+      "type": "stat",
+      "title": "DLQ empty · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "DLQ empty 99.9% · burn 1h",
-      "description": "binds_to: slos.dlq_empty_99_9",
       "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
+        "x": 12,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of DLQ empty · 99.9 % (objective 0.999 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.dlq_empty_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"dlq_empty_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -314,19 +441,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 4
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 10
               }
             ]
@@ -342,31 +472,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 6,
+      "id": 7,
+      "type": "stat",
+      "title": "Canary success · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Canary success 99.9% · burn 1h",
-      "description": "binds_to: slos.canary_success_99_9",
       "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
+        "x": 15,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Canary success · 99.9 % (objective 0.999 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.canary_success_99_9"
+        ]
       },
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h{slo=\"canary_success_99_9\"}",
-          "instant": true
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -374,19 +515,22 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
                 "value": 6
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 14
               }
             ]
@@ -402,31 +546,42 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
-      "id": 7,
+      "id": 8,
+      "type": "stat",
+      "title": "Canary p99 < 500 ms · burn 1 h",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "stat",
-      "title": "Log latency <20ms 99% · burn 1h",
-      "description": "binds_to: slos.log_latency_99_under_20ms",
       "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 4,
+        "x": 18,
+        "y": 2,
+        "w": 3,
         "h": 4
+      },
+      "description": "1 h burn rate of Canary p99 < 500 ms · 99 % (objective 0.99 over 30d).",
+      "pack": {
+        "binds_to": [
+          "slos.canary_latency_99_p99_500ms"
+        ]
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "ibmmq:errorbudget:burn_1h{slo=\"log_latency_99_under_20ms\"}",
-          "instant": true
+          "expr": "ibmmq:errorbudget:burn_1h{slo=\"canary_latency_99_p99_500ms\"}",
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
         }
       ],
       "fieldConfig": {
@@ -434,19 +589,96 @@
           "unit": "none",
           "decimals": 1,
           "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "#3DD68C",
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "#F5B14C",
+                "value": 6
+              },
+              {
+                "color": "#F0616D",
+                "value": 14
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Log latency < 20 ms · burn 1 h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 2,
+        "w": 3,
+        "h": 4
+      },
+      "description": "1 h burn rate of Log latency < 20 ms · 99 % (objective 0.99 over 7d).",
+      "pack": {
+        "binds_to": [
+          "slos.log_latency_99_under_20ms"
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ibmmq:errorbudget:burn_1h{slo=\"log_latency_99_under_20ms\"}",
+          "instant": false,
+          "range": true,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
                 "value": 3
               },
               {
-                "color": "red",
+                "color": "#F0616D",
                 "value": 8
               }
             ]
@@ -462,276 +694,357 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 8,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "stat",
-      "title": "Canary p99 <500ms 99% · burn 1h",
-      "description": "binds_to: slos.canary_latency_99_p99_500ms",
-      "gridPos": {
-        "x": 4,
-        "y": 4,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "ibmmq:errorbudget:burn_1h{slo=\"canary_latency_99_p99_500ms\"}",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 1,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 6
-              },
-              {
-                "color": "red",
-                "value": 14
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 9,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "stat",
-      "title": "Burn-rate alerts firing",
-      "gridPos": {
-        "x": 8,
-        "y": 4,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate!=\"\"}) or vector(0)",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value"
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     },
     {
       "id": 10,
+      "type": "bargauge",
+      "title": "Error-budget burn · last hour",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Burn rate · fast window (5m)",
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 6,
         "w": 12,
         "h": 8
       },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "ibmmq:errorbudget:burn_5m",
-          "legendFormat": "{{slo}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 11,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "Burn rate · slow window (1h)",
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
+      "description": "1 h error-budget burn rate per SLO: 1× consumes the budget exactly over the SLO window; amber at the smallest factor that alerts for that SLO, red at the largest (spec.policy).",
       "targets": [
         {
           "refId": "A",
           "expr": "ibmmq:errorbudget:burn_1h",
+          "instant": true,
           "legendFormat": "{{slo}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+          "min": 0,
+          "max": 20,
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#8B98A9",
+                "value": null
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_process_up_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Process up · 99.9 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 6
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 14
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_reachability_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Reachable · 99.9 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 6
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 14
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queue_headroom_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Queue headroom · 99.9 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 6
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 14
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message_age_99_under_60s"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Message age < 60 s · 99 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 4
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dlq_empty_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "DLQ empty · 99.9 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 4
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_success_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary success · 99.9 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 6
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 14
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_latency_99_p99_500ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary p99 < 500 ms · 99 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 6
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 14
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "log_latency_99_under_20ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Log latency < 20 ms · 99 %"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3DD68C",
+                      "value": null
+                    },
+                    {
+                      "color": "#F5B14C",
+                      "value": 3
+                    },
+                    {
+                      "color": "#F0616D",
+                      "value": 8
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 14,
+        "maxVizHeight": 26,
+        "legend": {
+          "showLegend": false
         }
       }
     },
     {
       "id": 12,
+      "type": "state-timeline",
+      "title": "Burn-rate & forecast alerts · pending / firing",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
-      "type": "timeseries",
-      "title": "Error ratio · 5m, per SLI",
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "{__name__=~\"ibmmq:.*:error_ratio_5m\"}",
-          "legendFormat": "{{__name__}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 13,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "type": "timeseries",
-      "title": "Burn-rate / forecast alerts (1 = pending, 2 = firing)",
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 6,
         "w": 12,
         "h": 8
       },
+      "description": "Multi-window burn-rate alerts (fast windows page, slow windows linger after incidents) and forecasts.",
       "targets": [
         {
           "refId": "A",
-          "expr": "(2 * max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"firing\", burn_rate!=\"\"})) or max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"pending\", burn_rate!=\"\"})",
+          "expr": "(2 * max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"firing\", burn_rate!=\"\"})) or max by (alertname) (ALERTS{pack=\"ibmmq\", alertstate=\"pending\", burn_rate!=\"\"}) or label_replace(vector(0), \"alertname\", \"no alert\", \"\", \"\")",
           "legendFormat": "{{alertname}}"
         },
         {
@@ -742,26 +1055,717 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "min": 0,
-          "max": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#4B5563"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "quiet",
+                  "color": "#1E3A34"
+                },
+                "1": {
+                  "text": "PENDING",
+                  "color": "#F5B14C"
+                },
+                "2": {
+                  "text": "FIRING",
+                  "color": "#F0616D"
+                }
+              }
+            }
+          ],
           "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
+            "lineWidth": 0,
+            "fillOpacity": 78
           }
         },
         "overrides": []
       },
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "center",
+        "rowHeight": 0.82,
         "legend": {
-          "displayMode": "table",
+          "showLegend": false,
+          "displayMode": "list",
           "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Burn rate · 5 m window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Fast window: reacts within minutes; pages when both it and the slow window exceed the factor. Hover for per-SLO values.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ibmmq:errorbudget:burn_5m",
+          "legendFormat": "{{slo}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#8B98A9",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 14
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_process_up_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Process up"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_reachability_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Reachable"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queue_headroom_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Queue headroom"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message_age_99_under_60s"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Message age < 60 s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dlq_empty_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "DLQ empty"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_success_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary success"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_latency_99_p99_500ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary p99 < 500 ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "log_latency_99_under_20ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Log latency < 20 ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Burn rate · 1 h window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Slow window: keeps burning for up to an hour after an incident by design.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ibmmq:errorbudget:burn_1h",
+          "legendFormat": "{{slo}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#8B98A9",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 6
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_process_up_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Process up"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "qmgr_reachability_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Reachable"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queue_headroom_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Queue headroom"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message_age_99_under_60s"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Message age < 60 s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dlq_empty_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "DLQ empty"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_success_99_9"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary success"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "canary_latency_99_p99_500ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Canary p99 < 500 ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "log_latency_99_under_20ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Log latency < 20 ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Error ratio · 5 m, per SLI",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Bad samples over expected samples in the last 5 minutes, per SLI.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{__name__=~\"ibmmq:.*:error_ratio_5m\"}",
+          "legendFormat": "{{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 4,
+            "spanNulls": 30000,
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:qmgr_process_up:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "qmgr_process_up"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:qmgr_reachability:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "qmgr_reachability"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:queue_depth_headroom:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "queue_depth_headroom"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:oldest_message_age:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "oldest_message_age"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:dlq_depth:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "dlq_depth"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:canary_success:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "canary_success"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:canary_roundtrip_p99:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "canary_roundtrip_p99"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ibmmq:log_write_latency:error_ratio_5m"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "log_write_latency"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Burn-rate alerts firing",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 6,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\", pack=\"ibmmq\", burn_rate!=\"\"}) or vector(0)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Forecast alerts firing",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 22,
+        "w": 6,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\", pack=\"ibmmq\", kind=\"forecast\"}) or vector(0)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#3DD68C",
+                "value": null
+              },
+              {
+                "color": "#F5B14C",
+                "value": 1
+              },
+              {
+                "color": "#F0616D",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "orientation": "auto",
+        "showPercentChange": false
       }
     }
   ]
