@@ -21,12 +21,14 @@
     "burn-rules": "node tools/gen-burn-rules.mjs",
     "generate": "node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs",
     "verify:dashboards": "node tools/verify-dashboards.mjs",
-    "lint": "node --check harness/run.mjs && node --check canary/src/index.mjs && node --check tools/gen-dashboards.mjs && node --check tools/gen-burn-rules.mjs",
+    "lint": "node --check harness/run.mjs && node --check canary/src/index.mjs && node --check tools/gen-dashboards.mjs && node --check tools/gen-burn-rules.mjs && node --check tools/gen-site.mjs",
+    "site": "node tools/gen-site.mjs --inventory sites/lab.inventory.yaml --env lab",
+    "site:check": "node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env all --check --strict",
     "certify": "node harness/run.mjs --settle 90",
     "certify:quick": "node harness/run.mjs --skip-chaos",
     "certify:chaos": "node harness/run.mjs --only chaos",
     "mqsc": "docker compose exec mq runmqsc QM1",
-    "test": "npm run lint && npm run validate:pack && node tools/check-pins.mjs --offline",
+    "test": "npm run lint && npm run validate:pack && node tools/check-pins.mjs --offline && node tools/test-site.mjs",
     "check:pins": "node tools/check-pins.mjs"
   }
 }
