@@ -1,5 +1,44 @@
 # STATUS
 
+## 2026-09-17 (afternoon) — the generators become Observogram's library; run for three reference packs
+
+**Ask:** generalise `gen-dashboards.mjs` so other components (Grafana, Prometheus, ...) get
+boards with the pack layers as the template; run it for Observogram's grafana, kafka and
+prometheus reference packs and validate the results; the functionality must live in
+Observogram and be used from here.
+
+**Done in Observogram** (branch `codex/pack-dashboards`, worktree
+`Observogram/.claude/worktrees/pack-dashboards`, PR into `develop`): `tools/lib/dashboards/lib.mjs`
+(visual system, panel factories, flow layout, pack-derived blocks), `tools/lib/dashboards/generic.mjs`
+(one board per `dashboards[]` entry in the pack's section order, template entries become real
+boards, every binding must be bound), `tools/lib/burn-rules.mjs` (the corrected burn compiler as
+a library: counter SLIs divide by the events that happened, filter comparisons in state SLIs
+rewritten to `== bool` with a warning, step from the pack's scrape_interval, lab or prod `for:`),
+CLIs `gen-dashboards.mjs` / `gen-burn-rules.mjs` (`--pack`, `--out-dir`, `--module`),
+`test-gen-pack.mjs` in `npm test` (40/40, lint 0 errors), and the generated output for the
+three packs under `reference-packs/dashboards` and `reference-packs/rules` with a README of
+findings.
+
+**Done here:** the three library files vendored under `vendor/observogram/lib/` (rule 4);
+`tools/gen-dashboards.mjs` and `tools/gen-burn-rules.mjs` are thin wrappers;
+`tools/dashboards/ibmmq.mjs` holds the MQ boards; `PACK` / `--pack` honoured by both generators
+and by check-rules, so the guide's site-pack step (7.1) is now true. One behaviour change: the
+canary's error ratio divides by the probes that happened (`clamp_min(increase(total), 1)`)
+instead of the expected count; pack snippet, evidence §8 and CLAUDE.md updated.
+
+**Verified:** MQ boards byte-identical through the vendored library (`git diff` empty); the
+burn file changed only in the four canary expressions; check-rules green; promtool check on
+all rule files and the alert unit tests SUCCESS; Prometheus reloaded; `certify:quick` after
+the reload (result in the session's final report). Reference packs: promtool on the three burn
+files and on all 194 panel expressions; Grafana 12.4.11 imported 12/12 boards (folder
+"Reference packs (generated)", still present); the prometheus pack ran live for two minutes
+with its recording rules loaded: 48 rules healthy, 9 of 11 pack rules producing, 37 panel
+targets with data, 0 errors, the two empty SLIs name histograms that do not exist.
+**Findings about the packs** (README in Observogram): grafana names 7 metrics Grafana 12.4.11
+does not expose; prometheus' two latency SLIs use `_bucket` names of a gauge and a summary;
+kafka and prometheus state SLIs use filter comparisons; all three expect alert names no
+compiler emits and declare a hand-written `burn_1h` rule without an `slo` label.
+
 ## 2026-09-17 (midday) — architecture at four levels, and the guide for existing queue managers
 
 **Ask:** an architecture document with several levels of detail, and, more importantly, a

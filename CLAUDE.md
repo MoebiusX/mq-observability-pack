@@ -65,8 +65,10 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
 1. **Pack and stack must not drift.** Any change to an SLI, recording rule, alert or
    dashboard binding is a change in BOTH `packs/ibmmq.pack.yaml` and the matching
    file under `stack/`. `node tools/check-rules.mjs` must stay green.
-2. **Dashboards and burn-rate rules are generated.** Edit `tools/gen-dashboards.mjs` or
-   change the pack's `spec.policy`, then `npm run generate`; never hand-edit
+2. **Dashboards and burn-rate rules are generated.** Edit `tools/dashboards/ibmmq.mjs` (the
+   MQ boards) or change the pack's `spec.policy`, then `npm run generate`; the library both
+   generators use (`vendor/observogram/lib/dashboards/`, `vendor/observogram/lib/burn-rules.mjs`)
+   is Observogram's, vendored under rule 4, and `tools/gen-*.mjs` are thin wrappers. Never hand-edit
    `stack/grafana/dashboards/*.json` or `stack/prometheus/rules/ibmmq.burn.yml`. When
    the generated recording rules change, paste `node tools/gen-burn-rules.mjs
    --pack-snippet` into `spec.queries.recording_rules` (check-rules compares them).
@@ -137,7 +139,8 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   …) are per-interval deltas, not counters: `overrideCType: false`, and rates are
   `sum_over_time(x[2m]) / 120`, never `rate()`. `ibmmq_channel_messages`, `_bytes_sent` and
   `_bytes_rcvd` are deltas too (raw samples 99/50/99/50 on a steady channel; `rate()` showed
-  half the real throughput), so the same estimator applies (`perSec()` in gen-dashboards).
+  half the real throughput), so the same estimator applies (`sum_over_time(...[2m]) / 120` in
+  `tools/dashboards/ibmmq.mjs`).
 - The native endpoint's counters already end in `_total` (`ibmmq_qmgr_commit_total`,
   `ibmmq_qmgr_destructive_get_total`); the collector appends `_total` only to OTLP
   counters such as the canary's `mq_canary_attempts_total`.
@@ -154,7 +157,7 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   `alert:ibmmq-queue-manager-down` matches `IBMMQQueueManagerDown`.
 - Dashboards: for each pack dashboard with `source: file://...`, the JSON `uid` must
   equal the pack `id`, and each `panel_bindings[].binds_to` must appear in some panel's
-  `pack.binds_to` array (the `binds` option in `gen-dashboards.mjs`; one panel may bind
+  `pack.binds_to` array (the `binds` option of the vendored panel factories; one panel may bind
   several ids, e.g. the error-budget bar gauge binds all eight SLOs). Panel `description`
   is for humans; check-rules still accepts the legacy `description: "binds_to: …"` line.
   A dashboard with `template:` and no `source` is skipped (reported as template-bound
@@ -168,8 +171,8 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   colours come from each SLO's policy factors (`burnThresholds()`), not a fixed 6×/14×.
   The unified board follows the pack's own section order (SLIs/SLOs → validation with MTTD
   and MTTR → policy and alerting → remediation → signals → pipelines → logs and traces); the
-  visual system (palette `C`, stat modes, timelines, bar gauges) is described in the
-  generator header. State timelines need `color.mode: fixed`; with `thresholds` Grafana 12
+  visual system (palette `C`, stat modes, timelines, bar gauges) is described in the header
+  of `vendor/observogram/lib/dashboards/lib.mjs`. State timelines need `color.mode: fixed`; with `thresholds` Grafana 12
   ignores value-mapping colours and renders grey rows (measured).
 - Certification metrics: every harness run POSTs its summary to the alert-sink (`/results`),
   which exposes it at `/metrics` (`mq_cert_verdict_code`, `mq_cert_mttd_seconds{experiment,
@@ -194,7 +197,8 @@ in 40-45 s. A `rate()`-ratio form of the canary alert took 105-109 s; do not go 
   require them. S5 grades symptom alerts, S6 burn-rate alerts (fast window FAIL, slow
   1h/6h window WARN: those legitimately keep burning for hours after any incident).
   The generator's PromQL deviates from the compiler on purpose (header + evidence §8):
-  error ratio = bad samples / expected samples (missing time counts as good), the short
+  error ratio = bad samples / expected samples for state and threshold SLIs and bad events /
+  events that happened for counter SLIs such as the canary (missing time counts as good), the short
   window needs ≥ 2 bad samples, forecasts regress the 1h burn and need 2h above 1×, the
   forecast horizon is capped at the 1 d regression window (the annotation says which horizon
   was evaluated) and forecast severity follows `on_projected_breach`. All were measured

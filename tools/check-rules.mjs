@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from '../vendor/observogram/lib/mini-yaml.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const pack = parseYaml(readFileSync(resolve(root, 'packs/ibmmq.pack.yaml'), 'utf8'));
+const argv = process.argv.slice(2);
+const packPath = (argv.indexOf('--pack') >= 0 ? argv[argv.indexOf('--pack') + 1] : null) || process.env.PACK || 'packs/ibmmq.pack.yaml';
+const pack = parseYaml(readFileSync(resolve(root, packPath), 'utf8'));
 const rulesDir = resolve(root, 'stack/prometheus/rules');
 const groups = readdirSync(rulesDir).filter(f => f.endsWith('.yml')).flatMap(f => parseYaml(readFileSync(resolve(rulesDir, f), 'utf8')).groups || []);
 const rules = groups.flatMap(g => g.rules);
