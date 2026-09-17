@@ -27,6 +27,7 @@ import { parse as parseYaml } from '../../vendor/observogram/lib/mini-yaml.mjs';
 import { RUNBOOK } from '../gen-burn-rules.mjs';
 import { generateDashboards } from '../gen-dashboards.mjs';
 import * as registry from './templates/index.mjs';
+import { promqlString } from './templates/lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REFERENCE_ALERTS = 'stack/prometheus/rules/ibmmq.alerts.yml';
@@ -111,10 +112,12 @@ function staticConfigs(ctx, source, target) {
 export function packSubstitutions(ctx) {
   const t = ctx.timing, { dur, durM, secs } = t, p = ctx.p, e = ctx.endpoints;
   const first = ctx.qmgrs[0];
+  // promqlString: the values land inside PromQL double-quoted strings, where a regex backslash
+  // must be doubled (promtool: "unknown escape sequence" otherwise); the lab's APP.* is unchanged
   const subs = [
-    { name: 'app queue pattern', find: 'queue=~"APP.*"', replace: `queue=~"${p.app_queue_pattern}"`, count: 3 },              // :207 :208 :220
-    { name: 'deadq exclusion', find: 'queue!="APP.DLQ"', replace: `queue!="${p.deadq}"`, count: 1 },                          // :220
-    { name: 'deadq selector', find: 'queue="APP.DLQ"', replace: `queue="${p.deadq}"`, count: 1 },                             // :231
+    { name: 'app queue pattern', find: 'queue=~"APP.*"', replace: `queue=~"${promqlString(p.app_queue_pattern)}"`, count: 3 },   // :207 :208 :220
+    { name: 'deadq exclusion', find: 'queue!="APP.DLQ"', replace: `queue!="${promqlString(p.deadq)}"`, count: 1 },               // :220
+    { name: 'deadq selector', find: 'queue="APP.DLQ"', replace: `queue="${promqlString(p.deadq)}"`, count: 1 },                  // :231
     { name: 'window3', find: '[30s]', replace: `[${dur(t.window3)}]`, count: 6 },                                             // :196 (comment) :207 :208 :220 :231 :264
     // the certification job keeps max(30 s, step); anchored with its job_name so the prod
     // override `prometheus.scrape_interval: 30s` (:139) is not touched
@@ -182,14 +185,24 @@ export function packRemovals(ctx) {
 export function runbooks() { return RUNBOOK; }
 
 // ---------------------------------------------------------------- templates, dashboards
+/** Render a registry map now; a template that returns null does not apply to this environment and is listed in site.json `skipped`. */
+function rendered(ctx, entries, render) {
+  const out = {};
+  for (const [path, fn] of entries) {
+    const content = render(fn, path);
+    if (content == null) { (ctx.manifest.skipped ??= []).push(path); continue; }
+    out[path] = content;
+  }
+  return out;
+}
 export function templates(ctx) {
-  return Object.fromEntries(Object.entries(registry.templates).map(([path, render]) => [path, (c) => render(c ?? ctx)]));
+  return rendered(ctx, Object.entries(registry.templates), (fn) => fn(ctx));
 }
 export function perQmgr(ctx, qm) {
-  return Object.fromEntries(Object.entries(registry.perQmgr).map(([path, render]) => [path.replaceAll('<qm>', qm.name), (c) => render(c ?? ctx, qm)]));
+  return rendered(ctx, Object.entries(registry.perQmgr).map(([path, fn]) => [path.replaceAll('<qm>', qm.name), fn]), (fn) => fn(ctx, qm));
 }
 export function fleet(ctxs) {
-  return Object.fromEntries(Object.entries(registry.fleet).map(([path, render]) => [path, () => render(ctxs)]));
+  return Object.fromEntries(Object.entries(registry.fleet).map(([path, render]) => [path, render(ctxs)]));
 }
 
 export function dashboardOptions(ctx) {
