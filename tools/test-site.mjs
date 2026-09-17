@@ -146,7 +146,9 @@ test('T4 --env prod: the site pack and the burn rules carry the production timin
   assert.equal(countMatches(text, '\n        environment: prod'), 5, 'the five chaos experiments');
   assert.equal(countMatches(text, 'environment: prod'), 10, 'plus the five labelled static_configs entries');
   assert.equal(countMatches(text, 'environment: lab'), 0);
-  assert.equal(countMatches(text, 'queue=~"ORD\\..*|PAY\\..*"'), 3);
+  // the inventory's regex ORD\..*|PAY\..* lands PromQL-escaped (a doubled backslash) inside the double-quoted matcher
+  assert.equal(countMatches(text, 'queue=~"ORD\\\\..*|PAY\\\\..*"'), 3);
+  assert.equal(countMatches(text, 'queue=~"ORD\\..*|PAY\\..*"'), 0, 'an unescaped backslash is an unknown escape sequence to promtool');
   assert.equal(countMatches(text, 'queue="SYSTEM.DEAD.LETTER.QUEUE"'), 1);
   assert.equal(countMatches(text, 'queue!="SYSTEM.DEAD.LETTER.QUEUE"'), 1);
   assert.ok(text.includes('- targets: [10.20.5.11:9157]\n                labels: { qmgr: QMORD1, environment: prod, site: dc1, shape: rdqm-ha, source: native }'));
@@ -233,10 +235,11 @@ test('T5 CLI: --env all partitions prod and staging; --env omitted with two envi
   try {
     const r = cli('--inventory', 'sites/fleet-example.inventory.yaml', '--env', 'all', '--out', out);
     assert.equal(r.status, 0, r.stderr + r.stdout);
-    assert.deepEqual(readdirSync(out).sort(), ['prod', 'staging']);
+    assert.deepEqual(readdirSync(out).sort(), ['alertmanager.fleet.yml', 'prod', 'staging']);
     for (const e of ['prod', 'staging']) for (const f of ['site.json', 'packs/ibmmq.pack.yaml', 'prometheus/rules/ibmmq.burn.yml', 'grafana/dashboards/ibmmq-unified.json']) assert.ok(existsSync(join(out, e, f)), `${e}/${f}`);
-    assert.match(r.stdout, /^prod: 2 queue managers, 4 hosts, 7 files → /m);
-    assert.match(r.stdout, /^staging: 1 queue manager, 1 host, 7 files → .*vantage single/m);
+    assert.match(r.stdout, /^prod: 2 queue managers, 4 hosts, 21 files → /m);
+    assert.match(r.stdout, /^staging: 1 queue manager, 1 host, 19 files → .*vantage single/m);
+    assert.ok(existsSync(join(out, 'alertmanager.fleet.yml')), 'the fleet Alertmanager file at <out>/');
     assert.equal(JSON.parse(readFileSync(join(out, 'staging', 'site.json'), 'utf8')).environment, 'staging');
     const omitted = cli('--inventory', 'sites/fleet-example.inventory.yaml', '--check');
     assert.equal(omitted.status, 2, omitted.stderr);
@@ -293,4 +296,166 @@ test('T10 adapter: the registry sample round-trips through --registry/--adapter 
   assert.match(c.stdout, /check ok: prod, staging/);
   assert.throws(() => adapter.toInventory([{ host: 'h', qmgr: 'Q', env: 'uat' }]), /no environment wiring for uat/);
   assert.throws(() => adapter.toInventory([{ host: 'h', qmgr: 'Q' }]), /row 0: missing env/);
+});
+
+// ----------------------------------------------------------------- T10 templates: the lab round trip
+const labRun = () => runWith([{ name: 'sites/lab.inventory.yaml', text: labText }], 'lab');
+const fileOf = (p, path) => { const f = p.files.find(x => x.path === path); assert.ok(f, `${path} rendered`); return f.content; };
+/** The reference text after exact, once-only replacements: the asserted deviation is a transformation, never an ignore list. */
+const expectDeviation = (text, replacements) => replacements.reduce((acc, [from, to]) => {
+  assert.equal(countMatches(acc, from), 1, `deviation anchor occurs once: ${from}`);
+  return acc.split(from).join(to);
+}, text);
+/** The &canary_env block of docker-compose.yaml as { KEY: value } with `${VAR:-default}` resolved to its default. */
+const composeCanaryEnv = () => {
+  const lines = rd('docker-compose.yaml').split('\n');
+  const start = lines.findIndex(l => /environment: &canary_env/.test(l));
+  assert.ok(start > 0, 'docker-compose.yaml has the &canary_env block');
+  const out = {};
+  for (const l of lines.slice(start + 1)) {
+    const m = /^\s{6}([A-Z_]+): (.*)$/.exec(l);
+    if (!m) break;
+    out[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/\$\{[A-Z_]+:-([^}]*)\}/g, '$1');
+  }
+  return out;
+};
+
+test('T10 templates: recording, alert, promtool-test, datasource and exporter files are byte-identical to stack/', () => {
+  const lab = labRun().partitions.lab;
+  for (const [g, s] of [
+    ['prometheus/rules/ibmmq.recording.yml', 'stack/prometheus/rules/ibmmq.recording.yml'],
+    ['prometheus/rules/ibmmq.alerts.yml', 'stack/prometheus/rules/ibmmq.alerts.yml'],
+    ['prometheus/tests/ibmmq.alerts.test.yml', 'stack/prometheus/tests/ibmmq.alerts.test.yml'],
+    ['grafana/provisioning/datasources/datasources.yaml', 'stack/grafana/provisioning/datasources/datasources.yaml'],
+    ['qmgrs/QM1/mq_prometheus.yaml', 'stack/mq-exporter/mq_prometheus.yaml'],
+  ]) assert.equal(fileOf(lab, g), rd(s), g);
+  assert.deepEqual(lab.manifest.skipped ?? [], [], 'every template applies to the lab');
+});
+
+test('T10 templates: the collector, Prometheus and Alertmanager files deviate from stack/ by exactly the environment wiring', () => {
+  const lab = labRun().partitions.lab;
+  assert.equal(fileOf(lab, 'prometheus/prometheus.yml'), expectDeviation(rd('stack/prometheus/prometheus.yml'), [
+    ['    lab: mq-obs\n', '    lab: mq-obs\n    environment: lab\n'],
+  ]));
+  assert.equal(fileOf(lab, 'alertmanager/alertmanager.yml'), expectDeviation(rd('stack/alertmanager/alertmanager.yml'), [
+    ['- matchers: [ severity = SEV1 ]', '- matchers: [ environment = "lab", severity = SEV1 ]'],
+  ]));
+  assert.equal(fileOf(lab, 'otelcol/config.yaml'), expectDeviation(rd('stack/otelcol/config.yaml'), [
+    ['labels: { qmgr: "${env:MQ_QMGR_NAME}", source: native }', 'labels: { qmgr: "QM1", environment: lab, site: lab, shape: container, source: native }'],
+    ['labels: { source: exporter }', 'labels: { environment: lab, site: lab, shape: container, source: exporter }'],
+    ['- targets: [ "alert-sink:9095" ]\n', '- targets: [ "alert-sink:9095" ]\n              labels: { environment: lab }\n'],
+    ['value: "${env:ENV}"', 'value: "lab"'],
+    ['value: "${env:MQ_QMGR_NAME}"', 'value: "QM1"'],
+    ['    external_labels:\n      service: ibmmq\n', '    external_labels:\n      service: ibmmq\n      environment: lab\n'],
+  ]));
+});
+
+test('T10 templates: canary.env equals the compose &canary_env block key by key; the new files carry the lab inventory', () => {
+  const lab = labRun().partitions.lab;
+  const env = Object.fromEntries(fileOf(lab, 'qmgrs/QM1/canary.env').split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/=(.*)/s).slice(0, 2)));
+  assert.deepEqual(env, composeCanaryEnv());
+  const inv = parseYaml(fileOf(lab, 'prometheus/rules/ibmmq.inventory.yml'));
+  assert.deepEqual(inv.groups[0].rules, [{ record: 'ibmmq:inventory:qmgr', expr: 'vector(1)', labels: { qmgr: 'QM1', environment: 'lab', site: 'lab', shape: 'container', vantage: 'dual' } }]);
+  assert.deepEqual(JSON.parse(fileOf(lab, 'prometheus/file_sd/ibmmq-native.json')), [{ targets: ['mq:9157'], labels: { qmgr: 'QM1', environment: 'lab', site: 'lab', shape: 'container', source: 'native' } }]);
+  assert.deepEqual(JSON.parse(fileOf(lab, 'prometheus/file_sd/ibmmq-exporter.json')), [{ targets: ['mq-exporter:9157'], labels: { qmgr: 'QM1', environment: 'lab', site: 'lab', shape: 'container', source: 'exporter' } }]);
+  assert.deepEqual(JSON.parse(fileOf(lab, 'prometheus/file_sd/certification.json')), [{ targets: ['alert-sink:9095'], labels: { environment: 'lab' } }]);
+});
+
+// ----------------------------------------------------------------- T6 / T7 / T9: the fleet's rendered files
+const fleetAll = () => runWith(fleet, 'all');
+
+test('T6 fleet: every target, resource, external label, exporter metadata and canary attribute carries its partition environment', () => {
+  const r = fleetAll();
+  assert.deepEqual(r.errors, []);
+  for (const [env, p] of Object.entries(r.partitions)) {
+    for (const f of p.files.filter(x => x.path.startsWith('prometheus/file_sd/'))) for (const e of JSON.parse(f.content)) assert.equal(e.labels.environment, env, f.path);
+    const sp = parseYaml(fileOf(p, 'packs/ibmmq.pack.yaml'));
+    for (const s of sp.spec.pipelines.receivers.find(x => x.name === 'prometheus').scrape_configs) for (const e of s.static_configs) assert.equal(e.labels?.environment, env, `pack pipelines ${s.job_name}`);
+    const otel = fileOf(p, 'otelcol/config.yaml');
+    assert.ok(otel.includes(`{ key: deployment.environment, value: "${env}", action: upsert }`), `${env}: resource processor`);
+    assert.ok(otel.includes(`    external_labels:\n      service: ibmmq\n      environment: ${env}\n`), `${env}: remote-write external labels`);
+    assert.ok(!otel.includes('${env:'), `${env}: no compose-time placeholders in a fleet gateway`);
+    assert.ok(fileOf(p, 'prometheus/prometheus.yml').includes(`  external_labels:\n    environment: ${env}\n`), `${env}: prometheus.yml external label`);
+    for (const qm of p.manifest.queue_managers) {
+      assert.ok(fileOf(p, `qmgrs/${qm.name}/mq_prometheus.yaml`).includes(`  metadataMap:\n    ENV: ${env}\n`), `${qm.name}: exporter metadataMap`);
+      assert.ok(fileOf(p, `qmgrs/${qm.name}/canary.env`).includes(`deployment.environment=${env},`), `${qm.name}: canary resource attributes`);
+    }
+    const am = parseYaml(fileOf(p, 'alertmanager/alertmanager.yml'));
+    for (const route of am.route.routes) assert.ok(route.matchers.includes(`environment = "${env}"`), `${env}: every Alertmanager route matches its environment`);
+  }
+});
+
+test('T7 fleet: per-environment Alertmanager routing and the merged fleet file (distinct receivers, secrets as file references)', () => {
+  const r = fleetAll();
+  const prod = parseYaml(fileOf(r.partitions.prod, 'alertmanager/alertmanager.yml'));
+  assert.equal(prod.route.receiver, 'mq-team');
+  assert.deepEqual(prod.route.routes.map(x => [x.matchers.join(' '), x.receiver, x.group_wait ?? null]), [['environment = "prod" severity = SEV1', 'pagerduty-mq', '10s'], ['environment = "prod" severity = SEV2', 'mq-oncall', null]]);
+  assert.equal(prod.route.group_wait, '30s'); assert.equal(prod.route.group_interval, '5m'); assert.equal(prod.route.repeat_interval, '4h'); assert.equal(prod.global.resolve_timeout, '1m');
+  assert.deepEqual(prod.receivers.map(x => x.name), ['pagerduty-mq', 'mq-oncall', 'mq-team']);
+  assert.equal(prod.receivers[0].pagerduty_configs[0].routing_key_file, '/etc/alertmanager/secrets/pagerduty_mq');
+  assert.equal(prod.receivers[1].msteamsv2_configs[0].webhook_url_file, '/etc/alertmanager/secrets/msteams_mq_oncall');
+  const staging = parseYaml(fileOf(r.partitions.staging, 'alertmanager/alertmanager.yml'));
+  assert.deepEqual(staging.route.routes.map(x => [x.matchers.join(' '), x.receiver]), [['environment = "staging" severity = SEV1', 'mq-team']], 'one receiver for every severity: only the SEV1 route (its own group_wait)');
+  const fleetFile = r.fleet.files.find(f => f.path === 'alertmanager.fleet.yml');
+  assert.ok(fleetFile, 'alertmanager.fleet.yml with --env all');
+  const fl = parseYaml(fleetFile.content);
+  assert.equal(fl.route.receiver, 'fleet-default');
+  assert.deepEqual(fl.route.routes.map(x => [x.matchers.join(' '), x.receiver]), [['environment = "prod"', 'prod-mq-team'], ['environment = "staging"', 'staging-mq-team']]);
+  assert.deepEqual(fl.route.routes[0].routes.map(x => x.receiver), ['prod-pagerduty-mq', 'prod-mq-oncall']);
+  const names = fl.receivers.map(x => x.name);
+  assert.equal(new Set(names).size, names.length, 'receiver names are distinct');
+  assert.deepEqual(names, ['fleet-default', 'prod-pagerduty-mq', 'prod-mq-oncall', 'prod-mq-team', 'staging-mq-team']);
+  for (const text of [fleetFile.content, fileOf(r.partitions.prod, 'alertmanager/alertmanager.yml')]) {
+    assert.ok(!/\b(routing_key|webhook_url|service_key):/.test(text), 'no secret value, only *_file references');
+  }
+});
+
+test('T9 templates (vantage single): the degraded rule set, the inventory join, the promtool cases, no native scrape anywhere', () => {
+  const p = fleetAll().partitions.staging;
+  const alerts = fileOf(p, 'prometheus/rules/ibmmq.alerts.yml');
+  assert.ok(!alerts.includes('IBMMQQueueManagerDown'));
+  assert.ok(alerts.includes('- alert: IBMMQQueueManagerRestarted') && alerts.includes('runbook: runbooks/qmgr-restarted.md'));
+  assert.ok(alerts.includes('expr: ibmmq_qmgr_status{job="ibmmq-exporter"} != 2\n        for: 30s'), 'Unreachable without the native gate, for: max(3 scrapes, symptom for)');
+  assert.ok(alerts.includes('expr: absent_over_time(up{job="ibmmq-exporter"}[1m])'), 'pipeline alert on the exporter job');
+  assert.equal(countMatches(alerts, 'sli: qmgr_process_up'), 0, 'no alert labelled with the dropped SLI');
+  for (const path of ['prometheus/rules/ibmmq.alerts.yml', 'prometheus/rules/ibmmq.recording.yml', 'prometheus/rules/ibmmq.burn.yml', 'prometheus/rules/ibmmq.inventory.yml', 'otelcol/config.yaml']) {
+    assert.equal(countMatches(fileOf(p, path), 'ibmmq-native'), 0, `${path}: nothing reads the native job`);
+  }
+  assert.equal(countMatches(fileOf(p, 'prometheus/rules/ibmmq.recording.yml'), 'qmgr_process_up'), 0);
+  const inv = fileOf(p, 'prometheus/rules/ibmmq.inventory.yml');
+  assert.ok(inv.includes('- alert: IBMMQQueueManagerSilent') && inv.includes('expr: ibmmq:inventory:qmgr unless on (qmgr) up{job="ibmmq-exporter"}') && inv.includes('runbook: runbooks/qmgr-silent.md'));
+  assert.ok(inv.includes('labels: { qmgr: QMORDS, environment: staging, site: dc1, shape: host, vantage: single }'));
+  const tests = fileOf(p, 'prometheus/tests/ibmmq.alerts.test.yml');
+  for (const marker of ['# (i) single vantage', '# (ii) a status blip', '# (iii) no MQ telemetry', '# (iv) the inventory says QMORDS exists', '# (v) uptime below four scrapes', '# M22']) assert.ok(tests.includes(marker), marker);
+  assert.ok(!tests.includes('# M10') && tests.includes('- ../rules/ibmmq.inventory.yml'));
+  assert.ok(!p.files.some(f => f.path === 'prometheus/file_sd/ibmmq-native.json'), 'no native file_sd for a single vantage');
+  const otel = fileOf(p, 'otelcol/config.yaml');
+  assert.ok(otel.includes('file_sd_configs:') && otel.includes('honor_labels: true') && !otel.includes('\n  filelog:\n') && otel.includes('receivers: [ otlp ]\n      processors: [ memory_limiter, resource, transform/mqlogs, batch ]'), 'file_sd scrape, honor_labels on the exporter job, no docker filelog receiver for amqerr-json');
+  const exporter = fileOf(p, 'qmgrs/QMORDS/mq_prometheus.yaml');
+  assert.ok(exporter.includes('ccdtUrl: file:///etc/mq/ccdt/QMORDS.json') && !exporter.includes('connName:') && exporter.includes('passwordFile: /run/secrets/mqmon-QMORDS') && exporter.includes('port: 9161'));
+  assert.ok(exporter.includes('    - "SYSTEM.DEAD.LETTER.QUEUE"\n') && !exporter.includes('"!SYSTEM.*"'), 'a SYSTEM.* DEADQ is listed and not excluded');
+  const canary = fileOf(p, 'qmgrs/QMORDS/canary.env');
+  assert.ok(canary.includes('MQ_CCDT_URL=file:///etc/mq/ccdt/QMORDS.json') && canary.includes('MQ_KEY_REPOSITORY=/etc/mq/tls/mqmon') && !canary.includes('ORDERS_QUEUE='));
+});
+
+test('T4 templates (prod, step 30): every window, for:, damping and interval follows the timing model', () => {
+  const p = fleetAll().partitions.prod;
+  const alerts = fileOf(p, 'prometheus/rules/ibmmq.alerts.yml');
+  assert.equal(countMatches(alerts, '\n        for: 2m\n'), 12, 'the twelve symptom alerts at alerts.symptom.for');
+  assert.equal(countMatches(alerts, '[3m]'), 3, 'native gate in the comment, Unreachable and the pipeline alert');
+  assert.ok(alerts.includes('keep_firing_for: 3m') && alerts.includes('[2m])) or vector(0)') && alerts.includes('[6m])) == 0') && alerts.includes('[90s])) < 15'));
+  assert.ok(alerts.includes('in the last 120 s although probes continue') && alerts.includes('in 6 min (hung'));
+  const rec = fileOf(p, 'prometheus/rules/ibmmq.recording.yml');
+  assert.ok(rec.includes('interval: 30s') && rec.includes('[5m:30s]') && countMatches(rec, '[90s]') === 6 && rec.includes('queue!="SYSTEM.DEAD.LETTER.QUEUE"'));
+  assert.ok(fileOf(p, 'grafana/provisioning/datasources/datasources.yaml').includes('timeInterval: 30s'));
+  assert.ok(fileOf(p, 'prometheus/prometheus.yml').includes('scrape_interval: 30s\n  evaluation_interval: 30s'));
+  const otel = fileOf(p, 'otelcol/config.yaml');
+  assert.ok(otel.includes('scrape_interval: 30s\n        scrape_timeout: 8s') && otel.includes('files: [ /etc/otelcol/file_sd/ibmmq-native.json ]') && !otel.includes('key: mq.qmgr.name'));
+  assert.ok(otel.includes('endpoint: https://mimir.prod.internal/api/v1/push\n    tls:\n      insecure: false'));
+  for (const qm of ['QMORD1', 'QMPAY1']) {
+    assert.ok(fileOf(p, `qmgrs/${qm}/mq_prometheus.yaml`).includes('pollInterval: 30s\n'), `${qm}: poll`);
+    assert.ok(fileOf(p, `qmgrs/${qm}/canary.env`).includes('INTERVAL_MS=30000'), `${qm}: probe`);
+  }
+  assert.deepEqual(JSON.parse(fileOf(p, 'prometheus/file_sd/ibmmq-native.json')).map(e => e.targets[0]), ['10.20.5.11:9157', 'mqpay1.prod.internal:9157'], 'the RDQM floating address for the native scrape');
+  assert.deepEqual(p.manifest.skipped, ['prometheus/tests/ibmmq.alerts.test.yml'], 'the lab-timed promtool cases are not rendered at a 30 s step');
 });
