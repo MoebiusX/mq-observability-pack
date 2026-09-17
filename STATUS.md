@@ -1,5 +1,48 @@
 # STATUS
 
+## 2026-09-17 (midday) — architecture at four levels, and the guide for existing queue managers
+
+**Ask:** an architecture document with several levels of detail, and, more importantly, a
+guide to instrument an existing MQ or RDQM cluster so it produces the same metrics and can be
+monitored like the reference system.
+
+**Done (branch `docs/architecture-and-onboarding`, PR into `develop`):**
+- `docs/ARCHITECTURE.md` rewritten: level 0 one paragraph; level 1 the twelve services with
+  images, ports, configs and a component map; level 2 the seven planes (contract, metrics,
+  logs, traces, alerting, synthetic, certification) and the dashboards, each with the files
+  that implement it and the check that proves it; level 3 every decision with its evidence;
+  level 4 operating and changing the lab. Four Mermaid diagrams.
+- `docs/INSTRUMENTING-EXISTING-MQ.md`: the metric and label contract; both vantage points
+  without the container's native endpoint (mq_prometheus with local bindings as an MQ SERVICE
+  that follows the queue manager, scraped through the RDQM floating IP, plus a client instance
+  over a dedicated SVRCONN); queue manager MQSC; a least-privilege monitoring identity; JSON
+  error logs from `qm.ini`; exporter configs; collector and Prometheus scrape configs; the
+  file-based log agent; the canary; the site-pack workflow for queue names; production
+  timings; RDQM (what moves with the queue manager, failover as seen by the pack, HA state as
+  textfile metrics); verification; a gaps table. README points at both.
+
+**Verified live (MQ 10.0.0.5, mq_prometheus v6.0.0):** the exporter's least-privilege
+authority set, by running it as the non-admin `app` user over `DEV.APP.SVRCONN` across six
+rounds (grant, run, scrape twice, compare with the 175-family inventory): qmgr CONNECT/INQ/DSP,
+`SYSTEM.ADMIN.COMMAND.QUEUE` PUT, `SYSTEM.DEFAULT.MODEL.QUEUE` GET/PUT/INQ (without PUT the
+`$SYS` subscriptions fail silently and only object-status metrics appear; without INQ the open
+fails 2035), `SYSTEM.ADMIN.TOPIC` SUB, DSP on monitored queues and channels (without channel
+DSP: 172 families, 5 of 13 channel series). Every grant was reverted and the `app` records
+compared with their original state; no test container left. A `queues: ["!*"]` list gives a
+queue-manager-only instance (112 families, 0 queue/channel series). The guide's 27 MQSC
+statements pass `runmqsc -v`; both collector configs pass `otelcol validate` 0.161.0; the
+Prometheus config passes promtool 3.14; the Alertmanager config passes amtool 0.34; all five
+Mermaid diagrams parse with mermaid 11; every metric name in both documents exists in the
+inventory or the live TSDB; every relative link resolves. Not verified: anything on a real
+RDQM group (none available); those statements cite IBM's documentation and say so.
+
+**Gaps the guide records for a non-container deployment** (each with its intended fix):
+C6 requires the container-only `ibmmq_qmgr_commit_total`; 16 unified-board targets read
+native `_total` counters; the canary has no TLS/CCDT; the lab's queue names sit in the pack,
+the recording rules, synthetic S4 and one panel; the generator and SLI windows assume a 10 s
+scrape; the prod `for:`/`group_wait` overrides are declared, not applied; no RDQM state signal
+or failover experiment.
+
 ## 2026-09-17 (morning) — crash check, PR #3, PR #2 corrected, upstream issues drafted
 
 **What happened overnight.** The 00:14Z session ended normally (its final report is in the
@@ -245,12 +288,18 @@ canary samples 3-5 s. A full `npm run certify` takes ~11 min.
 ## Next (in order)
 1. Review and merge PR #3. Then tag `v0.2.0` on `main` at the merge commit and push the tag:
    pack and package both declare 0.2.0 and no tag or release exists yet.
-2. File the four Observogram compiler issues (drafted 2026-09-17, see above).
-3. `npm run down` when done looking at Grafana; the lab has been up since 2026-09-16 21:08Z and
+2. Review and merge the docs PR (`docs/architecture-and-onboarding` into `develop`).
+3. File the four Observogram compiler issues (drafted 2026-09-17, see above).
+4. Work the guide's gaps table (`docs/INSTRUMENTING-EXISTING-MQ.md` section 10) in this order:
+   C6 accepting the exporter's commit count for the native job; a generator option for
+   non-container native panels; canary TLS/CCDT; queue names from the pack in S4 and the
+   generator; scrape interval as a pack-level parameter for the generator and SLI windows;
+   applying the prod `for:`/`group_wait` overrides; an RDQM state SLI and failover experiment.
+5. `npm run down` when done looking at Grafana; the lab has been up since 2026-09-16 21:08Z and
    holds nothing that is not in `reports/` (re-publish with `--publish` after the next `up`).
-4. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
+6. Re-run `npm run certify` after every change under `stack/`, `canary/` or `harness/`;
    the report in `reports/` is the artefact. Expect ~25 min.
-5. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
+7. 2-QM uniform cluster variant, Observogram JSON export of the pack, KrystalineX
    integration (orders bridge RabbitMQ ↔ MQ) as a separate repo/phase.
 
 ## Decisions taken (and how to revert them)
