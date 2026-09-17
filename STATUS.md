@@ -1,5 +1,40 @@
 # STATUS
 
+## Current state (rewritten each session; the dated log below is history)
+
+- **Branches.** `main` = PR #6 merge pending via PR #7 (`develop` → `main`, open, Auto-fix on);
+  `develop` carries the vendored Observogram generators. Tag `v0.2.0` = PR #3 merge.
+- **Lab.** Up on Nitro5 since 2026-09-16 21:08Z, running the regenerated burn rules
+  (canary ratio over probes that happened); last `certify:quick` PASS 16/16 after that reload;
+  Grafana holds a "Reference packs (generated)" folder with 15 imported boards from
+  Observogram's three reference packs (delete when done).
+- **Generators.** Live in Observogram (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
+  merged: PR #87 library, PR #88 unified board for every pack); this repo vendors them
+  (`vendor/observogram/SOURCES.json` records commit and hash per file, `tools/check-pins.mjs`
+  verifies) and keeps the MQ boards in `tools/dashboards/ibmmq.mjs`.
+- **In flight (Observogram).** `codex/compile-burn-rules`: wiring `compilePrometheusRules` to the
+  burn-rules library (orchestrated job, golden-gated). Fleet generator design
+  (inventory-driven `gen-site`, `--env prod`, `--profile non-container`, degraded single-vantage
+  alert set) in progress; blocked only on the registry format (`50974-mq-registry`, not
+  reachable from here).
+- **Open feedback, in priority order.** (1) fleet/site generator from an inventory; (2) prod
+  overrides applied by the generators; (3) non-container profile (C6 family, 16 native panels);
+  (4) canary TLS/CCDT; (5) degraded mode for single-vantage fleets; (6) RDQM signal and
+  failover experiment; (7) Helm chart defaults and scaffold gates (repos not available here);
+  (8) sustainability: pin drift (done: `tools/check-pins.mjs` in `npm test` and CI), vendor
+  staleness (done), STATUS structure (this block), identity (`REPO_URL` override done).
+
+## 2026-09-17 (late afternoon) — sustainability items from the fleet feedback
+
+`tools/check-pins.mjs`: Compose defaults, `.env.example`, the CI tool versions, the two
+Dockerfiles and the README must name the same versions (they did; CI now proves it every push),
+and every vendored file must equal the file at the commit `vendor/observogram/SOURCES.json`
+records (network) and match its stored hash (offline, in `npm test`); upstream `develop` moving
+past the commit is a warning, `--strict` makes it fail. `generic.mjs` re-vendored at bc36ad7
+(unified board for every pack); MQ boards byte-identical. `REPO_URL` overrides the runbook link
+base on the boards for forks. Two workflows in Observogram worktrees are running the compiler
+wiring and the fleet-generator design; results land in the next entry.
+
 ## 2026-09-17 (afternoon) — the generators become Observogram's library; run for three reference packs
 
 **Ask:** generalise `gen-dashboards.mjs` so other components (Grafana, Prometheus, ...) get
