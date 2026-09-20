@@ -2,15 +2,16 @@
 
 ## Current state (rewritten each session; the dated log below is history)
 
-- **Branches.** `main` = PR #7 merge (2026-09-17 12:57Z). `develop` = 766d1b4 + PR #8
-  (`feat/pin-drift-check`, open). `feat/gen-site` (this session, stacked on PR #8): the fleet
-  generator, increment 1; PR into `develop` to open once #8 merges (or against it). Tag
-  `v0.2.0` = PR #3 merge.
-- **Lab.** Up on Nitro5 since 2026-09-16; since 2026-09-17 22:47 local it runs the files
-  gen-site renders from `sites/lab.inventory.yaml` (collector, Prometheus, Alertmanager and the
-  new inventory rules: environment wiring everywhere); `certify:quick` PASS 16/16 at 20:52Z on
-  that state. Grafana still holds the "Reference packs (generated)" folder (15 boards; delete
-  when done).
+- **Branches.** `main` = PR #7 merge (2026-09-17 12:57Z). `develop` = PR #8 + PR #9 merged
+  (2026-09-17 21:51Z: pin drift, gen-site increment 1). `feat/platform-self-metrics` (2026-09-20):
+  the lab scrapes its own platform components and validates Observogram's grafana and prometheus
+  reference packs live; PR into `develop` to open. Tag `v0.2.0` = PR #3 merge.
+- **Lab.** Up on Nitro5 since 2026-09-16; runs the files gen-site renders from
+  `sites/lab.inventory.yaml`. Since 2026-09-20 12:08Z Prometheus also scrapes Grafana, Loki and
+  Tempo (job names `prometheus-self`, `alertmanager`, `grafana`, `loki`, `tempo`) and loads
+  `stack/prometheus/rules-reference/` (the grafana and prometheus reference packs' rules, 95 rules,
+  all healthy). Grafana's "Reference packs (generated)" folder now shows data for both packs (kafka's
+  five boards stay empty: no Kafka here). Last `certify:quick`: see the 2026-09-20 entry.
 - **The lab is a rendered site.** `npm run site` renders it; every generated file with a twin
   under `stack/` is byte-identical (`tools/test-site.mjs` T10, in `npm test`). The generic
   core is Observogram's `tools/lib/site/*` (PR #90 open, vendored at `codex/gen-site` 0594723);
@@ -19,9 +20,11 @@
   non-container, 30 s step; staging: client exporter only) renders and validates in CI with
   promtool / amtool / otelcol-contrib; `check-rules --site` cross-checks a partition.
 - **Generators.** Observogram library (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
-  PR #87 + #88 merged; PR #89 open wires `compilePrometheusRules` to the same PromQL), vendored
-  with commit and hash per file (`vendor/observogram/SOURCES.json`, `tools/check-pins.mjs`;
-  the online staleness probe warns for `lib/site/*` until PR #90 lands on `develop`).
+  `tools/lib/site/`; PRs #87, #88, #89 (compile wiring) and #90 (gen-site core) all merged,
+  `develop` a5945fb), vendored with commit and hash per file (`vendor/observogram/SOURCES.json`,
+  `tools/check-pins.mjs`). **Pending re-vendor:** #89 changed `burn-rules.mjs`, `dashboards/lib.mjs`
+  and `dashboards/generic.mjs` after the copies here (c42ced3 / bc36ad7); refresh them in their own
+  PR and prove `npm run generate` stays a no-op (or paste the new `--pack-snippet` and recertify).
 - **Feedback status.** (1) fleet/site generator: increment 1 done (inventory v1, multi-environment
   inheritance and partitions, exact-count pack anchors, every stack file as a template, per-qmgr
   exporter and canary config, file_sd, inventory rules, fleet Alertmanager, registry adapter
@@ -39,6 +42,46 @@
   `rule_labels: true`); label names (`environment` / `deployment.environment` assumed); prod
   vantage (dual assumed: MQ SERVICE local exporter + client exporter); environment set
   (prod/staging/lab assumed).
+
+## 2026-09-20 — the lab scrapes its own platform; Observogram's grafana and prometheus packs validated live
+
+**Ask:** the imported reference-pack boards (`grafana-unified` and friends) showed no data; add
+Grafana and Prometheus to the scrape jobs so the packs can be validated here.
+
+**Why they were empty:** nothing scraped Grafana, and the packs' recording rules (the SLI tiles read
+`grafana:*` / `prometheus:*` records, the burn panels the policy's `errorbudget` records) were not
+loaded; the earlier run had loaded them ad hoc and removed them.
+
+**Done** (`feat/platform-self-metrics`, 4 commits): `tools/site/templates/prometheus.mjs` scrapes the
+platform's own components: Alertmanager and Grafana wherever an environment names one (prod:
+`grafana.prod.internal` over https; staging: none), Loki and Tempo in the lab; the self-scrape job is
+`prometheus-self`, the name Observogram's prometheus pack declares (nothing in the MQ pack reads that
+job). The lab's `rule_files` also loads `/etc/prometheus/rules-reference/*.yml` (compose mount of
+`stack/prometheus/rules-reference/`; check-rules ignores it). `tools/reference-packs.mjs`
+(`npm run refpacks`) reads each pack, its generated burn-rate rules and its boards from an Observogram
+git ref (`git show`, no working tree), materialises `spec.queries.recording_rules` with `ref:slis.<id>`
+expanded, copies the burn-rate file, skips the declared unlabelled `errorbudget:burn_1h` (the policy
+generates it with labels), reloads Prometheus, imports the boards and reports what produces data.
+CI promtool-checks the directory; tests assert the per-environment jobs.
+
+**Validation against origin/develop a5945fb (grafana 1.0.0, prometheus 1.0.0):** 11 + 10 recording
+rules and 19 + 19 policy records loaded, all 95 rules healthy; 10 boards imported; 166 panel
+expressions valid, 0 errors. Recording rules producing: grafana 11/16, prometheus 11/15. Panels with
+data: grafana-unified 26/44, prometheus-unified 27/44, the four smaller boards of each pack 5-12 of
+7-14. Every empty panel is one of four known kinds: metrics Grafana 12.4.11 does not expose (database
+query latency, alerting evaluation, login), the prometheus pack's two latency SLIs on histograms that
+do not exist (`scrape_duration`, `query_latency` `_bucket`), the certification tiles (no harness feeds
+these packs), and alert tables with nothing pending or firing. Threshold error-ratio records need
+~5 minutes of history before they appear (empty at the first check, present at the second).
+
+**Live:** `docker compose up -d prometheus` recreated the container with the mount (promdata kept),
+all five platform targets up; two Prometheus reloads. `certify:quick` first came back WARN on C10
+only: the collector carried a cumulative 132 failed remote-write points from a host-standby wake
+sometime after 2026-09-18 (`increase(...[1h]) == 0`, retention hides the exact moment; every other
+check PASS). The collector was restarted to reset the counter; the failure series only exists after
+a failure, so the old one lingered for the 5-minute staleness window (two early recertifications
+still WARN). Once it was gone: `npm run certify:quick` **PASS 16/16** at 2026-09-20 12:19Z
+(C1–C10 incl. C10, S1–S6; canary 100 %, p99 9.8 ms; orders 4.95/4.94 per second).
 
 ## 2026-09-17 (evening) — gen-site increment 1: a fleet from one pack and an inventory; the lab becomes a rendered site
 
