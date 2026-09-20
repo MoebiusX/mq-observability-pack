@@ -9,9 +9,20 @@ import { parse as parseYaml } from '../vendor/observogram/lib/mini-yaml.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const packPath = (argv.indexOf('--pack') >= 0 ? argv[argv.indexOf('--pack') + 1] : null) || process.env.PACK || 'packs/ibmmq.pack.yaml';
+const opt = (n) => (argv.indexOf(n) >= 0 ? argv[argv.indexOf(n) + 1] : null);
+// --site <site.json>: a gen-site partition. Its pack, rules and boards live under the partition
+// directory (packs/, prometheus/rules/, grafana/dashboards/); the pack's dashboards[].source
+// entries still name the lab paths (the site pack is the reference pack rewritten), so board
+// files are resolved by basename under the partition's grafana/dashboards. Runbooks are the
+// repository's. --rules-dir and --dashboards-dir set the two locations by hand.
+const sitePath = opt('--site');
+const site = sitePath ? JSON.parse(readFileSync(resolve(root, sitePath), 'utf8')) : null;
+const siteDir = sitePath ? dirname(resolve(root, sitePath)) : null;
+const packPath = opt('--pack') || (site ? resolve(siteDir, site.pack.file) : null) || process.env.PACK || 'packs/ibmmq.pack.yaml';
 const pack = parseYaml(readFileSync(resolve(root, packPath), 'utf8'));
-const rulesDir = resolve(root, 'stack/prometheus/rules');
+const rulesDir = resolve(root, opt('--rules-dir') || (siteDir ? resolve(siteDir, 'prometheus/rules') : 'stack/prometheus/rules'));
+const dashboardsDir = opt('--dashboards-dir') ? resolve(root, opt('--dashboards-dir')) : siteDir ? resolve(siteDir, 'grafana/dashboards') : null;
+const dashboardFile = (source) => { const file = source.replace(/^file:\/\//, ''); return dashboardsDir ? resolve(dashboardsDir, file.split('/').pop()) : resolve(root, file); };
 const groups = readdirSync(rulesDir).filter(f => f.endsWith('.yml')).flatMap(f => parseYaml(readFileSync(resolve(rulesDir, f), 'utf8')).groups || []);
 const rules = groups.flatMap(g => g.rules);
 const records = new Set(rules.filter(r => r.record).map(r => r.record));
@@ -84,8 +95,8 @@ for (const r of pack.spec.queries.recording_rules) {
   }
 }
 for (const d of pack.spec.dashboards) if (d.source) {
-  const file = d.source.replace(/^file:\/\//, '');
-  let json; try { json = JSON.parse(readFileSync(resolve(root, file), 'utf8')); } catch { bad++; console.error(`✗ dashboard file missing: ${file}`); continue; }
+  const file = dashboardFile(d.source);
+  let json; try { json = JSON.parse(readFileSync(file, 'utf8')); } catch { bad++; console.error(`✗ dashboard file missing: ${file}`); continue; }
   if (json.uid !== d.id) { bad++; console.error(`✗ dashboard uid ${json.uid} != pack id ${d.id}`); }
   const panels = (json.panels || []).flatMap(p => [p, ...(p.panels || [])]);   // rows may nest panels when collapsed
   // bindings live in the panel's `pack.binds_to` array (gen-dashboards); a legacy

@@ -127,6 +127,57 @@ published checksum. Build inputs are pinned to content as well: base images by d
 exporter's source tag by commit, the IBM client tarball by SHA-256 (`stack/mq-exporter/Dockerfile`,
 `canary/Dockerfile`).
 
+## Sites: a fleet from one pack and an inventory
+
+`tools/gen-site.mjs` renders one directory per environment from the reference pack and a *site
+inventory* (`sites/*.inventory.yaml`, format v1): the site pack (the reference pack rewritten by
+exact-count text anchors, so a hand edit that breaks an anchor fails instead of slipping through),
+the compiled burn-rate rules at that environment's scrape step, the recording and alert rules,
+the promtool unit tests, the collector gateway config and its file_sd targets, Prometheus,
+Alertmanager (per environment, plus one merged `alertmanager.fleet.yml` for `--env all`), the
+Grafana datasources and boards, and per queue manager the client exporter config and the
+canary's environment. The generic core is Observogram's (`vendor/observogram/lib/site/`,
+vendored); everything MQ-specific is the module `tools/site/ibmmq.mjs` and its templates
+(`tools/site/templates/`): each template is the lab file under `stack/` with holes only where
+the inventory or the environment drives a value.
+
+```
+npm run site                    # the lab: sites/lab.inventory.yaml → sites/lab/ (byte-identical to stack/, tools/test-site.mjs proves it)
+npm run site:check              # the two-environment fleet example, every environment, --check --strict (writes nothing)
+node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env prod --out /tmp/sites
+node tools/gen-site.mjs --registry registry.json --adapter tools/site/adapters/example.mjs --env all --check
+node tools/check-rules.mjs --site sites/prod/site.json     # pack ↔ rules ↔ boards cross-check on a rendered partition
+```
+
+The inventory carries environments (`environments.<name>`: scrape interval, `vantage: dual|single`,
+`profile: container|non-container`, endpoints, receivers, secret *references*), hosts and queue
+managers (shape `container|host|multi-instance|rdqm-ha|rdqm-dr`, the client address — the floating
+IP for RDQM —, ports, channels, TLS/CCDT). The environment is inherited file → host → queue manager,
+files merge, and every rendered target, resource attribute, external label and Alertmanager route
+carries it. Timings come from the pack's `spec.environments.<env>.overrides` (a closed vocabulary)
+and the inventory's scrape interval: a 30 s step gives `[90s]` windows, `for: 2m`, a 3 m native
+gate, 30 s / 10 s group waits, and the chaos budgets are re-computed. `vantage: single` (client
+exporter only, no MQ SERVICE local exporter yet) renders the degraded set: no
+`IBMMQQueueManagerDown`, Unreachable without the native gate, `IBMMQQueueManagerSilent` from the
+inventory join and `IBMMQQueueManagerRestarted` from uptime, boards without process panels.
+`profile: non-container` switches the queue-manager counters to the exporter's per-interval
+names and the delta estimator. A registry becomes an inventory through a pure adapter
+(`tools/site/adapters/example.mjs` is the pattern); the schema never changes for a registry.
+Not generated yet: MQSC, `qm.ini`, the local exporter and host agents (increment 2), canary
+TLS (3), RDQM signals and a failover experiment (4), delivery gates (5).
+
+### The platform's own metrics, and Observogram's reference packs
+
+Prometheus scrapes itself, Alertmanager, Grafana, Loki and Tempo (`stack/prometheus/prometheus.yml`,
+rendered from the lab inventory: Grafana wherever an environment names one, Loki and Tempo in the
+lab). That makes the lab a live test bed for Observogram's `grafana` and `prometheus` reference
+packs: `npm run refpacks` (`tools/reference-packs.mjs`) reads the packs, their generated burn-rate
+rules and boards from an Observogram git ref (`--observogram ../Observogram --ref origin/develop`),
+materialises the packs' recording rules into `stack/prometheus/rules-reference/` (a directory
+Prometheus loads and `check-rules` ignores), imports the boards into Grafana's "Reference packs
+(generated)" folder and reports which recording rules produce samples and which board panels
+return data, are empty or error.
+
 ## Versions
 
 MQ `icr.io/ibm-messaging/mq:10.0.0.5-r1` (switch to `9.4.5.1-r1` via `MQ_IMAGE_TAG`),
@@ -143,7 +194,8 @@ packs/ibmmq.pack.yaml          the contract
 stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
-tools/                         validate-pack, check-rules, gen-dashboards + dashboards/ibmmq.mjs (the MQ boards), gen-burn-rules (spec.policy → Prometheus alerts); the generators are thin wrappers over Observogram's library in vendor/
+tools/                         validate-pack, check-rules, gen-dashboards + dashboards/ibmmq.mjs (the MQ boards), gen-burn-rules (spec.policy → Prometheus alerts), gen-site + site/ibmmq.mjs and site/templates/ (a fleet from an inventory); the generators are thin wrappers over Observogram's library in vendor/
+sites/                         site inventories: lab.inventory.yaml (the lab, rendered byte-identically) and fleet-example.inventory.yaml (prod + staging: RDQM, TLS, non-container, single vantage)
 docs/                          ARCHITECTURE (four levels), INSTRUMENTING-EXISTING-MQ (existing queue managers, RDQM), CERTIFICATION, catalogue-evidence/ (evidence trail + the live metric inventory), reviews/
 runbooks/                      one per remediation trigger
 vendor/observogram/            pack schema + validator (lifted from Observogram)

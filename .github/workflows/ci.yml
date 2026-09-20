@@ -31,7 +31,7 @@ jobs:
           curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
           tar xzf prometheus-${PROM_VERSION}.linux-amd64.tar.gz --strip-components=1 prometheus-${PROM_VERSION}.linux-amd64/promtool
           ./promtool check config stack/prometheus/prometheus.yml
-          ./promtool check rules stack/prometheus/rules/*.yml
+          ./promtool check rules stack/prometheus/rules/*.yml stack/prometheus/rules-reference/*.yml
           ./promtool test rules stack/prometheus/tests/*.yml
       - name: otelcol validate
         run: |
@@ -51,9 +51,33 @@ jobs:
           curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
           tar xzf alertmanager-${AM_VERSION}.linux-amd64.tar.gz --strip-components=1 alertmanager-${AM_VERSION}.linux-amd64/amtool
           ./amtool check-config stack/alertmanager/alertmanager.yml
+      - name: version pins agree across files; vendored copies match their recorded upstream commit
+        # compose defaults, .env.example, this workflow's tool versions, the Dockerfiles and the
+        # README must name the same versions; vendor/observogram/* must equal the file at the commit
+        # SOURCES.json records (a moved upstream develop is a warning, not a failure).
+        run: node tools/check-pins.mjs
       - name: generated artefacts are not hand-edited (dashboards, burn-rate rules)
         # git diff alone cannot see a newly generated but untracked file; git status can.
         run: |
           node tools/gen-dashboards.mjs && node tools/gen-burn-rules.mjs
           git diff --exit-code stack/grafana/dashboards stack/prometheus/rules
           test -z "$(git status --porcelain stack/grafana/dashboards stack/prometheus/rules)" || { git status --porcelain stack/grafana/dashboards stack/prometheus/rules; exit 1; }
+      - name: sites — the fleet example renders for every environment and every partition validates
+        # gen-site (vendor/observogram/lib/site + tools/site) renders the lab and the two-environment
+        # fleet example; the pinned promtool / amtool / otelcol-contrib downloaded above check every
+        # partition's rules (and unit tests where rendered), Alertmanager file and gateway config.
+        # The lab round trip (byte-identical to stack/ except the asserted environment wiring) and
+        # check-rules --site on every partition already run inside `npm test` (tools/test-site.mjs).
+        run: |
+          set -euo pipefail
+          npm run site:check
+          node tools/gen-site.mjs --inventory sites/lab.inventory.yaml --env lab --out "$RUNNER_TEMP/sites"
+          node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env all --out "$RUNNER_TEMP/sites"
+          for p in "$RUNNER_TEMP"/sites/*/; do
+            echo "== $p"
+            ./promtool check rules "$p"prometheus/rules/*.yml
+            if [ -f "$p"prometheus/tests/ibmmq.alerts.test.yml ]; then ./promtool test rules "$p"prometheus/tests/ibmmq.alerts.test.yml; fi
+            ./amtool check-config "$p"alertmanager/alertmanager.yml
+            ./otelcol-contrib validate --config="$p"otelcol/config.yaml
+          done
+          ./amtool check-config "$RUNNER_TEMP/sites/alertmanager.fleet.yml"

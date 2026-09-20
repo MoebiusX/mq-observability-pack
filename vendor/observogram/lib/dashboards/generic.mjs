@@ -1,11 +1,18 @@
-// Generic dashboards from any ObservabilityPack: one board per `spec.dashboards[]` entry, laid
-// out in the pack's own section order (contract → validation → policy and alerting →
-// remediation → pack-specific signals → pipelines → logs and traces). Boards with `source:`
-// get the panels their `panel_bindings` declare (SLI tiles, error-budget burn for bound SLOs,
-// per-resource rollups for bound derived views); `template: ref:platform/slo-burn-template`
-// becomes a real burn board for `params.slos`; `ref:platform/per-resource-template` a board
-// for `params.view`. A pack module (tools/gen-dashboards.mjs --module) can add signal rows per
-// board id or replace the derived SLI tiles with hand-written ones.
+// Generic dashboards from any ObservabilityPack.
+//
+// Every pack gets a Unified Observability board, `<name>-unified`, whether or not it declares
+// one: the whole pack on one page in the pack's own section order (§1-2 contract: every SLI
+// and SLO → §10 validation: MTTD, MTTR, certification and the synthetic checks → §7-8 policy and
+// alerting → §9 remediation → the signals behind the SLIs: pack-module rows and the pack's
+// derived views → §3-5 pipelines → logs and traces). It is the board that matters most; the
+// declared boards are views of it.
+//
+// Then one board per `spec.dashboards[]` entry: a `source:` entry gets exactly what its
+// `panel_bindings` declare (SLI tiles, error-budget burn for bound SLOs, per-resource rollups
+// for bound derived views) plus the alert timelines; `template: ref:platform/slo-burn-template`
+// becomes a real burn board for `params.slos`; `ref:platform/per-resource-template` a board for
+// `params.view`. A pack module (tools/gen-dashboards.mjs --module) can replace the derived SLI
+// tiles with hand-written ones, add synthetic panels, and add signal rows per board id.
 import {
   configure, ctx, humanize, row, text, stat, ts, logs, traces, header, dashboard, resetIds,
   derivedSliTiles, derivedViewPanel, burnBars, burnCurves, burnThresholds, alertTimelines, alertTable, alertCounters,
@@ -13,8 +20,10 @@ import {
 } from './lib.mjs';
 
 const basename = (p) => String(p).replace(/^file:\/\//, '').split('/').pop();
+export const unifiedIdOf = (pack) => `${pack.metadata.name}-unified`;
 /** "grafana-alerting-health" → "Alerting health" (the pack name prefix is dropped). */
 export function titleOf(pack, d) {
+  if (d.id === unifiedIdOf(pack)) return 'Unified Observability';
   const id = String(d.id).replace(new RegExp(`^${pack.metadata.name}[-_]`), '');
   return humanize(id);
 }
@@ -31,6 +40,7 @@ function bindings(d) {
 }
 const scrapeJobs = (pack) => (pack.spec.pipelines?.receivers || []).flatMap(r => (r.scrape_configs || []).map(s => s.job_name)).filter(Boolean);
 const backendProducts = (pack) => new Set((pack.spec.telemetry?.backends || []).map(b => b.product));
+const tileWidth = (n) => (n <= 6 ? 4 : 3);
 
 function pipelinesPanels(pack) {
   const svc = pack.metadata.name;
@@ -63,48 +73,83 @@ function logsTracesPanels(pack) {
   }
   return out;
 }
+/** The pack's synthetic checks as declared (id, kind, target, interval, assertions, severity): what the canary of this pack is supposed to prove. */
+function syntheticTable(pack) {
+  const checks = pack.spec.validation?.synthetic_checks || [];
+  const fmt = (a) => (a && typeof a === 'object' ? Object.entries(a).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ') : String(a));
+  const rows = checks.map(c => `| \`${c.id}\` | ${c.kind || '-'} | \`${c.target || '-'}\` | ${c.interval || '-'} | ${(c.assertions || []).map(fmt).join('; ') || '-'} | ${c.on_fail_severity || '-'} |`);
+  return text(`| Check | Kind | Target | Interval | Assertions | On fail |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n\n<small>Declared in the pack's \`validation.synthetic_checks\`; the pack module supplies the panels that show the probes' own metrics.</small>`, { title: 'Synthetic checks · as declared', h: Math.min(3 + checks.length, 8) });
+}
 const sloTiles = (pack, sloIds) => { const c = ctx(); return pack.spec.slos.filter(s => sloIds.includes(s.id)).map(s =>
-  stat(`${c.sloRename[s.id]} · burn 1 h`, `${c.svc}:errorbudget:burn_1h{slo="${s.id}"}`, { binds: `slos.${s.id}`, desc: `1 h burn rate of ${c.sloLabel[s.id]} (objective ${s.objective} over ${s.window}).`, decimals: 1, thresholds: burnThresholds(s.id), w: sloIds.length <= 6 ? 4 : 3 })); };
+  stat(`${c.sloRename[s.id]} · burn 1 h`, `${c.svc}:errorbudget:burn_1h{slo="${s.id}"}`, { binds: `slos.${s.id}`, desc: `1 h burn rate of ${c.sloLabel[s.id]} (objective ${s.objective} over ${s.window}).`, decimals: 1, thresholds: burnThresholds(s.id), w: tileWidth(sloIds.length) })); };
 
 /**
- * Build every board a pack declares. Returns [{ id, file, dashboard }]. `module` may provide
- * `sliTiles(pack, sliIds)` (hand-written tiles), `signals[boardId]` (extra panels, inserted after
- * remediation) and `configure` overrides (displayName, sloLabel, certSel, repoUrl).
+ * Build every board for a pack: the unified board first, then one per `spec.dashboards[]` entry.
+ * Returns [{ id, file, dashboard }]. `module` may provide `configure(pack)` (displayName, sloLabel,
+ * certSel, repoUrl), `sliTiles(pack, ids)`, `synthetic(pack)` (panels for the synthetic row) and
+ * `signals[boardId]` (extra panels, inserted after remediation on the unified board and at the end
+ * of a declared board).
  */
 export function genericBoards(pack, { module = null, repoUrl = null } = {}) {
   const dashboards = pack.spec.dashboards || [];
+  const unifiedId = unifiedIdOf(pack);
+  const declaredUnified = dashboards.find(d => d.id === unifiedId) || null;
   const overrides = module?.configure ? module.configure(pack) : {};
-  configure({ pack, repoUrl, ...overrides, boards: dashboards.map(d => [d.id, titleOf(pack, d)]) });
+  configure({ pack, repoUrl, ...overrides, boards: [[unifiedId, 'Unified'], ...dashboards.filter(d => d.id !== unifiedId).map(d => [d.id, titleOf(pack, d)])] });
   const c = ctx();
   const chaos = pack.spec.validation?.chaos_experiments || [];
+  const synth = pack.spec.validation?.synthetic_checks || [];
   const views = Object.fromEntries((pack.spec.queries?.derived_views || []).map(v => [v.id, v]));
-  const tiles = (ids) => (module?.sliTiles ? module.sliTiles(pack, ids) : derivedSliTiles(pack, ids, { w: ids.length <= 6 ? 4 : 3 }));
-  const primaryId = dashboards.find(d => d.source)?.id;
+  const allSlis = (pack.spec.slis || []).map(s => s.id), allSlos = (pack.spec.slos || []).map(s => s.id);
+  const tiles = (ids) => (module?.sliTiles ? module.sliTiles(pack, ids) : derivedSliTiles(pack, ids, { w: tileWidth(ids.length) }));
+  const viewPanel = (v) => (views[v] ? derivedViewPanel(pack, views[v], `ref:queries.${v}`) : text(`Derived view \`${v}\` is bound but not declared in spec.queries.derived_views.`, { title: humanize(v), h: 3 }));
   const out = [];
+
+  // ---------------------------------------------------------------- unified (pack order)
+  resetIds();
+  const unified = [
+    header('Unified Observability', 'One board in the pack\'s own order: SLIs and SLOs, the validation that proves them (MTTD, MTTR, certification, synthetic checks), policy and alerting, remediation, the signals underneath, the pipeline, logs and traces.', unifiedId),
+    row('§1-2 · Contract — SLIs and SLOs'),
+    ...tiles(allSlis),
+    ...(allSlos.length ? [burnBars(allSlos.map(s => `slos.${s}`), 12, 8), ...burnCurves(6, 'hidden')] : []),
+    ...(chaos.length ? [row('§10 · Validation — MTTD, MTTR and certification'), ...certTiles(), mttdBars(12, 8), mttrBars(12, 8), ...certCounts()] : []),
+    ...(synth.length || module?.synthetic ? [row('§10 · Validation — synthetic checks'), ...(module?.synthetic ? module.synthetic(pack) : []), ...(synth.length ? [syntheticTable(pack)] : [])] : []),
+    row('§7-8 · Policy and alerting'),
+    ...alertCounters(4), alertTimelines(12, 4)[0], alertTable(12, 8), alertTimelines(12, 8)[1],
+    ...((pack.spec.remediation || []).length ? [row('§9 · Remediation — runbooks and guardrails'), remediationTable()] : []),
+    ...(module?.signals?.[unifiedId] || []),
+    ...(Object.keys(views).length ? [row('Signals — the pack\'s derived views'), ...Object.keys(views).map(viewPanel)] : []),
+    ...pipelinesPanels(pack),
+    ...logsTracesPanels(pack),
+  ];
+  out.push({ id: unifiedId, file: declaredUnified?.source ? basename(declaredUnified.source) : `${unifiedId}.json`, dashboard: dashboard(unifiedId, `${c.displayName} — Unified Observability`, unified, [pack.metadata.name, 'pack', 'unified'], {
+    description: `Everything about ${c.displayName} on one board, in the pack's order: SLIs and SLOs, MTTD/MTTR and certification, policy and alerting, remediation, signals, pipeline, logs and traces.`,
+    time: { from: 'now-3h', to: 'now' },
+  }) });
+
+  // ---------------------------------------------------------------- declared boards
   for (const d of dashboards) {
+    if (d.id === unifiedId) continue;
     resetIds();
     const title = titleOf(pack, d);
     const tags = [pack.metadata.name, 'pack'];
     if (d.source) {
-      const b = bindings(d), primary = d.id === primaryId;
+      const b = bindings(d);
       const blurb = [b.slis.length ? `SLIs ${b.slis.join(', ')}` : null, b.slos.length ? `SLOs ${b.slos.join(', ')}` : null, b.views.length ? `views ${b.views.join(', ')}` : null].filter(Boolean).join(' · ') || 'Pack-declared board.';
       const panels = [
         header(title, `${blurb}.`, d.id),
         ...(b.slis.length || b.slos.length ? [row('§1-2 · Contract — SLIs and SLOs'), ...tiles(b.slis)] : []),
         ...(b.slos.length ? [burnBars(b.slos.map(s => `slos.${s}`), 12, 8, b.slos), ...burnCurves(6, 'hidden')] : []),
-        ...(b.views.length ? [row('§5 · Derived views'), ...b.views.map(v => (views[v] ? derivedViewPanel(pack, views[v], `ref:queries.${v}`) : text(`Derived view \`${v}\` is bound but not declared in spec.queries.derived_views.`, { title: humanize(v), h: 3 })))] : []),
-        ...(primary && chaos.length ? [row('§10 · Validation — MTTD, MTTR and certification'), ...certTiles(), mttdBars(12, 8), mttrBars(12, 8), ...certCounts()] : []),
-        ...(primary ? [row('§7-8 · Policy and alerting'), ...alertCounters(4), alertTimelines(12, 4)[0], alertTable(12, 8), alertTimelines(12, 8)[1]] : [row('Alerting'), ...alertTimelines(12, 6)]),
-        ...(primary && (pack.spec.remediation || []).length ? [row('§9 · Remediation — runbooks and guardrails'), remediationTable()] : []),
+        ...(b.views.length ? [row('§5 · Derived views'), ...b.views.map(viewPanel)] : []),
+        row('Alerting'), ...alertTimelines(12, 6),
         ...(module?.signals?.[d.id] || []),
-        ...(primary ? [...pipelinesPanels(pack), ...logsTracesPanels(pack)] : []),
       ];
-      out.push({ id: d.id, file: basename(d.source), dashboard: dashboard(d.id, `${c.displayName} — ${title}`, panels, [...tags, ...(primary ? ['overview'] : [])], { description: `${c.displayName} pack board "${title}": ${blurb}.`, time: { from: primary ? 'now-3h' : 'now-1h', to: 'now' } }) });
+      out.push({ id: d.id, file: basename(d.source), dashboard: dashboard(d.id, `${c.displayName} — ${title}`, panels, tags, { description: `${c.displayName} pack board "${title}": ${blurb}.` }) });
       continue;
     }
     const tpl = String(d.template || '');
     if (/slo-burn-template$/.test(tpl)) {
-      const sloIds = (d.params?.slos || []).filter(id => pack.spec.slos.some(s => s.id === id));
+      const sloIds = (d.params?.slos || []).filter(id => allSlos.includes(id));
       const panels = [
         header(title, 'Error-budget burn per SLO on the fast and slow windows, and the burn-rate / forecast alert history.', d.id),
         ...sloTiles(pack, sloIds),
@@ -129,18 +174,29 @@ export function genericBoards(pack, { module = null, repoUrl = null } = {}) {
   return out;
 }
 
-/** Every `panel_bindings[].binds_to` of a source dashboard must be bound by a panel; uid must equal id. */
+/**
+ * Every `panel_bindings[].binds_to` of a declared source dashboard must be bound by a panel, a
+ * burn-template board must bind its `params.slos`, the unified board must bind every SLI and
+ * SLO of the pack, and every board's uid must equal its id.
+ */
 export function checkBindings(pack, boards) {
   const problems = [];
-  for (const d of pack.spec.dashboards || []) {
-    const b = boards.find(x => x.id === d.id);
-    if (!b) { problems.push(`${d.id}: not generated`); continue; }
-    if (b.dashboard.uid !== d.id) problems.push(`${d.id}: uid ${b.dashboard.uid}`);
+  const unifiedId = unifiedIdOf(pack);
+  const declared = new Map((pack.spec.dashboards || []).map(d => [d.id, d]));
+  const ids = new Set([...declared.keys(), unifiedId]);
+  for (const id of ids) {
+    const d = declared.get(id);
+    const b = boards.find(x => x.id === id);
+    if (!b) { problems.push(`${id}: not generated`); continue; }
+    if (b.dashboard.uid !== id) problems.push(`${id}: uid ${b.dashboard.uid}`);
     const panels = (b.dashboard.panels || []).flatMap(p => [p, ...(p.panels || [])]);
     const bound = new Set(panels.flatMap(p => (Array.isArray(p.pack?.binds_to) ? p.pack.binds_to : [])));
-    const wanted = d.source ? (d.panel_bindings || []).map(x => x.binds_to) : /slo-burn-template$/.test(String(d.template || '')) ? (d.params?.slos || []).map(s => `slos.${s}`) : [];
-    for (const w of wanted) if (!bound.has(w)) problems.push(`${d.id}: no panel bound to ${w}`);
-    for (const p of panels) for (const t of p.targets || []) if (/undefined|NaN/.test(String(t.expr || t.query || ''))) problems.push(`${d.id}: panel "${p.title}" has a malformed target`);
+    const wanted = new Set();
+    if (d?.source) for (const x of d.panel_bindings || []) wanted.add(x.binds_to);
+    if (d && /slo-burn-template$/.test(String(d.template || ''))) for (const s of d.params?.slos || []) wanted.add(`slos.${s}`);
+    if (id === unifiedId) { for (const s of pack.spec.slis || []) wanted.add(`slis.${s.id}`); for (const s of pack.spec.slos || []) wanted.add(`slos.${s.id}`); }
+    for (const w of wanted) if (!bound.has(w)) problems.push(`${id}: no panel bound to ${w}`);
+    for (const p of panels) for (const t of p.targets || []) if (/undefined|NaN/.test(String(t.expr || t.query || ''))) problems.push(`${id}: panel "${p.title}" has a malformed target`);
   }
   return problems;
 }
