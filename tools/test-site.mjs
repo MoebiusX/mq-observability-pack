@@ -370,7 +370,7 @@ test('prometheus.yml per environment: Grafana is scraped where the environment n
   assert.ok(!staging.includes('job_name: grafana'), 'staging declares no Grafana endpoint');
   for (const text of [prod, staging]) {
     assert.ok(!text.includes('job_name: loki') && !text.includes('job_name: tempo') && !text.includes('rules-reference'), 'lab-only jobs and rules stay in the lab');
-    assert.ok(text.includes('- job_name: prometheus\n') && text.includes('- job_name: alertmanager\n'));
+    assert.ok(text.includes('- job_name: prometheus-self\n') && text.includes('- job_name: alertmanager\n'), 'the self-scrape job carries the reference pack\'s name');
   }
 });
 

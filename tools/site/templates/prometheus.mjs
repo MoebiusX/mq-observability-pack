@@ -47,7 +47,9 @@ alerting:
         - targets: [ "${hostPort(am)}" ]${isHttps(am) ? '\n      scheme: https' : ''}
 
 scrape_configs:
-  - job_name: prometheus
+  # prometheus-self: the job name Observogram's prometheus reference pack declares for a Prometheus
+  # scraping itself (its pipelines panels select on it); nothing in the MQ pack reads this job.
+  - job_name: prometheus-self
     static_configs:
       - targets: [ "127.0.0.1:9090" ]
 ${platform}`;
