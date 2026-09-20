@@ -24,6 +24,7 @@ npm run site                    # render the lab from sites/lab.inventory.yaml i
 npm run site:check              # render every environment of sites/fleet-example.inventory.yaml, --check --strict, write nothing
 node tools/gen-site.mjs --inventory sites/fleet-example.inventory.yaml --env all --out /tmp/sites   # one partition per environment
 node tools/check-rules.mjs --site /tmp/sites/prod/site.json                                       # the cross-check on a rendered partition
+npm run refpacks                # Observogram reference packs (grafana, prometheus) against this lab: materialise their rules into stack/prometheus/rules-reference, import their boards, report which rules and panels have data (needs ../Observogram with origin/develop fetched)
 promtool check config stack/prometheus/prometheus.yml && promtool check rules stack/prometheus/rules/*.yml
 ENV=lab MQ_QMGR_NAME=QM1 otelcol-contrib validate --config stack/otelcol/config.yaml   # config uses ${env:...}
 amtool check-config stack/alertmanager/alertmanager.yml

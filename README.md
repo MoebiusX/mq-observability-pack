@@ -166,6 +166,18 @@ names and the delta estimator. A registry becomes an inventory through a pure ad
 Not generated yet: MQSC, `qm.ini`, the local exporter and host agents (increment 2), canary
 TLS (3), RDQM signals and a failover experiment (4), delivery gates (5).
 
+### The platform's own metrics, and Observogram's reference packs
+
+Prometheus scrapes itself, Alertmanager, Grafana, Loki and Tempo (`stack/prometheus/prometheus.yml`,
+rendered from the lab inventory: Grafana wherever an environment names one, Loki and Tempo in the
+lab). That makes the lab a live test bed for Observogram's `grafana` and `prometheus` reference
+packs: `npm run refpacks` (`tools/reference-packs.mjs`) reads the packs, their generated burn-rate
+rules and boards from an Observogram git ref (`--observogram ../Observogram --ref origin/develop`),
+materialises the packs' recording rules into `stack/prometheus/rules-reference/` (a directory
+Prometheus loads and `check-rules` ignores), imports the boards into Grafana's "Reference packs
+(generated)" folder and reports which recording rules produce samples and which board panels
+return data, are empty or error.
+
 ## Versions
 
 MQ `icr.io/ibm-messaging/mq:10.0.0.5-r1` (switch to `9.4.5.1-r1` via `MQ_IMAGE_TAG`),
