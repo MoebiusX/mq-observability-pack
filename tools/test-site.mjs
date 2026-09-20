@@ -354,9 +354,24 @@ test('T10 templates: the environment wiring the lab carries (what the transition
     '    external_labels:\n      service: ibmmq\n      environment: lab\n',
   ]) assert.equal(countMatches(otel, needle), 1, needle);
   assert.ok(!otel.includes('${env:'), 'no compose-time placeholders: the rendering is literal');
-  assert.ok(fileOf(lab, 'prometheus/prometheus.yml').includes('  external_labels:\n    lab: mq-obs\n    environment: lab\n'));
+  const prom = fileOf(lab, 'prometheus/prometheus.yml');
+  assert.ok(prom.includes('  external_labels:\n    lab: mq-obs\n    environment: lab\n'));
+  // the platform's own metrics (what the Observogram reference packs read) and the reference rules directory
+  for (const job of ['alertmanager:9093', 'grafana:3000', 'loki:3100', 'tempo:3200']) assert.ok(prom.includes(`- targets: [ "${job}" ]`), job);
+  assert.ok(prom.includes('  - /etc/prometheus/rules-reference/*.yml\n'));
   assert.ok(fileOf(lab, 'alertmanager/alertmanager.yml').includes('- matchers: [ environment = "lab", severity = SEV1 ]'));
   void expectDeviation;
+});
+
+test('prometheus.yml per environment: Grafana is scraped where the environment names one (https when it says so); Loki, Tempo and the reference rules are lab-only', () => {
+  const r = fleetAll();
+  const prod = fileOf(r.partitions.prod, 'prometheus/prometheus.yml'), staging = fileOf(r.partitions.staging, 'prometheus/prometheus.yml');
+  assert.ok(prod.includes('  - job_name: grafana\n    static_configs:\n      - targets: [ "grafana.prod.internal" ]\n    scheme: https\n'));
+  assert.ok(!staging.includes('job_name: grafana'), 'staging declares no Grafana endpoint');
+  for (const text of [prod, staging]) {
+    assert.ok(!text.includes('job_name: loki') && !text.includes('job_name: tempo') && !text.includes('rules-reference'), 'lab-only jobs and rules stay in the lab');
+    assert.ok(text.includes('- job_name: prometheus\n') && text.includes('- job_name: alertmanager\n'));
+  }
 });
 
 test('T10 templates: canary.env equals the compose &canary_env block key by key; the new files carry the lab inventory', () => {

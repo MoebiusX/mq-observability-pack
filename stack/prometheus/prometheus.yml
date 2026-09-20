@@ -1,5 +1,6 @@
 # Prometheus for the MQ lab. All application metrics arrive via remote-write
-# from the OTel Collector; Prometheus only scrapes itself and Alertmanager.
+# from the OTel Collector; Prometheus scrapes only itself and the platform's own components
+# (Alertmanager, Grafana, Loki, Tempo).
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
@@ -9,6 +10,9 @@ global:
 
 rule_files:
   - /etc/prometheus/rules/*.yml
+  # Observogram reference packs (grafana, prometheus), materialised by tools/reference-packs.mjs
+  # for live validation of their rules and boards against this lab; not part of the MQ pack.
+  - /etc/prometheus/rules-reference/*.yml
 
 alerting:
   alertmanagers:
@@ -22,3 +26,12 @@ scrape_configs:
   - job_name: alertmanager
     static_configs:
       - targets: [ "alertmanager:9093" ]
+  - job_name: grafana
+    static_configs:
+      - targets: [ "grafana:3000" ]
+  - job_name: loki
+    static_configs:
+      - targets: [ "loki:3100" ]
+  - job_name: tempo
+    static_configs:
+      - targets: [ "tempo:3200" ]

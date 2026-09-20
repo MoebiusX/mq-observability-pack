@@ -145,6 +145,9 @@ services:
     volumes:
       - ./stack/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./stack/prometheus/rules:/etc/prometheus/rules:ro
+      # Observogram reference packs (grafana, prometheus) materialised for live validation
+      # (tools/reference-packs.mjs); a separate directory so check-rules sees only the MQ rules.
+      - ./stack/prometheus/rules-reference:/etc/prometheus/rules-reference:ro
       - promdata:/prometheus
     ports:
       - "127.0.0.1:29090:9090"
