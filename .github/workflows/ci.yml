@@ -31,7 +31,7 @@ jobs:
           curl -sSL ${base}/sha256sums.txt | sha256sum -c --ignore-missing -
           tar xzf prometheus-${PROM_VERSION}.linux-amd64.tar.gz --strip-components=1 prometheus-${PROM_VERSION}.linux-amd64/promtool
           ./promtool check config stack/prometheus/prometheus.yml
-          ./promtool check rules stack/prometheus/rules/*.yml
+          ./promtool check rules stack/prometheus/rules/*.yml stack/prometheus/rules-reference/*.yml
           ./promtool test rules stack/prometheus/tests/*.yml
       - name: otelcol validate
         run: |

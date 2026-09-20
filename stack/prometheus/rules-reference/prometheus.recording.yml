@@ -1,0 +1,47 @@
+# Recording rules of Observogram's prometheus reference pack (prometheus 1.0.0), materialised by
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (a5945fb) reference-packs/prometheus.pack.yaml
+# spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
+# ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
+# edit: rerun the tool. Skipped (the policy generates them with labels): prometheus:errorbudget:burn_1h.
+groups:
+  - name: prometheus.reference.recording.30s
+    interval: 30s
+    rules:
+      - record: prometheus:scrape_success:ratio_5m
+        expr: (sum(up == 1)) / (count(up))
+      - record: prometheus:scrape_success:error_ratio_5m
+        expr: 1 - prometheus:scrape_success:ratio_5m
+      - record: prometheus:scrape_duration:p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le)(rate(scrape_duration_seconds_bucket[5m])))
+      - record: prometheus:wal_integrity:ratio_5m
+        expr: |
+          (sum(rate(prometheus_tsdb_wal_truncations_total[5m])) -
+            sum(rate(prometheus_tsdb_wal_corruptions_total[5m]))) / (sum(rate(prometheus_tsdb_wal_truncations_total[5m])))
+      - record: prometheus:rule_evaluation:ratio_5m
+        expr: |
+          (sum(rate(prometheus_rule_evaluations_total[5m])) -
+            sum(rate(prometheus_rule_evaluation_failures_total[5m]))) / (sum(rate(prometheus_rule_evaluations_total[5m])))
+      - record: prometheus:rule_evaluation:error_ratio_5m
+        expr: 1 - prometheus:rule_evaluation:ratio_5m
+      - record: prometheus:query_latency:p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le)(rate(prometheus_engine_query_duration_seconds_bucket[5m])))
+      - record: prometheus:query_concurrency:saturation_5m
+        expr: |
+          max(
+            prometheus_engine_queries / prometheus_engine_queries_concurrent_max
+          )
+      - record: prometheus:alertmanager_notification:ratio_5m
+        expr: |
+          (sum(rate(prometheus_notifications_sent_total[5m])) -
+            sum(rate(prometheus_notifications_errors_total[5m]))) / (sum(rate(prometheus_notifications_sent_total[5m])))
+  - name: prometheus.reference.recording.1m
+    interval: 1m
+    rules:
+      - record: prometheus:tsdb_compaction:ratio_1h
+        expr: |
+          (sum(rate(prometheus_tsdb_compactions_total[1h])) -
+            sum(rate(prometheus_tsdb_compactions_failed_total[1h]))) / (sum(rate(prometheus_tsdb_compactions_total[1h])))
