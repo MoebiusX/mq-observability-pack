@@ -136,7 +136,10 @@ export function checkInventory({ envs, itemLabel }) {
 
 // ---------------------------------------------------------------- the expected sets (site.json)
 // The queue managers answer on the exporter job (and the native job in a dual vantage), where
-// `up` carries the static qmgr label (design §8). Queues and channels are counted per queue
+// the target's static qmgr label lands on `up` (design §8). The lab is the exception, on
+// purpose (STATUS.md): its exporter target carries no qmgr label, so there only the native job
+// answers for QM1 and the exporter's unlabelled `up` drops out of `max by (qmgr)`. No `host`
+// kind: no MQ scrape job labels `up` with host. Queues and channels are counted per queue
 // manager from the exporter's gauges over the last five minutes — the inventory cannot
 // enumerate them — with floors from params.expect where a queue manager declares them.
 export function expectedKinds(ctx) {

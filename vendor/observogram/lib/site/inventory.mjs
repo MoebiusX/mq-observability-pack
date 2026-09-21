@@ -92,9 +92,14 @@ export const instanceKindOf = (inventory) => (isObj(inventory?.instanceKind) ? i
  */
 export function inventorySchema(base, module = null, { instances = null } = {}) {
   if (!isObj(base)) throw new Error('inventorySchema: the base schema object is required (the CLI reads inventory.schema.json)');
-  // Without a module the caller may still name the collection (a merged inventory knows its
-  // key): the placeholders stay permissive, the key follows the inventory.
-  const inst = module ? instancesOf(module) : (isObj(instances) ? { ...instancesOf(null), ...instances, schema: null } : instancesOf(null));
+  // The caller may name the collection (a merged inventory knows its key): with a module the
+  // module's fragment and titles apply under that key; without one the placeholders stay
+  // permissive and the descriptor is the caller's.
+  const fromModule = instancesOf(module);
+  const keyOf = (d) => (typeof d?.key === 'string' && IDENT.test(d.key) ? d.key : null);
+  const inst = !isObj(instances) ? fromModule
+    : module ? { ...fromModule, key: keyOf(instances) ?? fromModule.key }
+      : { ...fromModule, ...instances, key: keyOf(instances) ?? fromModule.key, schema: null };
   const schema = { ...base, properties: { ...(base.properties || {}) }, $defs: { ...(base.$defs || {}) } };
   const ps = module?.paramsSchema || {};
   for (const [scope, def] of Object.entries(PARAM_DEFS)) {

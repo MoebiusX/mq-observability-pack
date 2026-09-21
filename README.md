@@ -169,8 +169,9 @@ TLS (3), RDQM signals and a failover experiment (4), delivery gates (5).
 **Is the right number of things being monitored?** Every partition's `site.json` carries an
 `expected` block — what the inventory says should be reporting: the queue managers by name
 (kind `qmgr`, series `ibmmq:inventory:qmgr`, the `up` series of the `ibmmq-exporter` and, in a
-dual vantage, `ibmmq-native` jobs carry the `qmgr` label), the hosts, and queues and channels
-counted per queue manager from the exporter's gauges, with floors where a queue manager declares
+dual vantage, `ibmmq-native` jobs carry the `qmgr` label; in the lab only the native one does,
+the exporter target is deliberately unlabelled), and queues and channels counted per queue
+manager from the exporter's gauges, with floors where a queue manager declares
 `params.expect: { queues, channels }`. An Observogram journey that names the partition
 (`inventory: { site: sites/prod/site.json }`) compares those sets with the live `up` series
 through the MCP and reports, per kind, up / down / silent / unexpected; its `gate.inventory`

@@ -53,9 +53,9 @@
     "lib/site/expected.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/site/expected.mjs",
-      "commit": "3ac67ef",
+      "commit": "7abc640",
       "track": "develop",
-      "sha256": "481e3e4d48bc2a2b6841ae7b63e8dd891673ea01cbf0477df5b39f390404bf4e"
+      "sha256": "9999fa6e1ab4c44a7cd1d9d785a06551a0f5b719fcf6396b3ae67401c443da38"
     },
     "lib/site/inventory.schema.json": {
       "repo": "MoebiusX/Observogram",
@@ -67,9 +67,9 @@
     "lib/site/inventory.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/site/inventory.mjs",
-      "commit": "c658add",
+      "commit": "7abc640",
       "track": "develop",
-      "sha256": "697a63a736132ac91bc80e675d9c2677913c9ee6eb2c4e21134b0477a0617810"
+      "sha256": "184760276b8db41e5f0ed9309c7a1eda089ea018e71fd61513e4a491229e1da2"
     },
     "lib/site/timing.mjs": {
       "repo": "MoebiusX/Observogram",

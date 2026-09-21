@@ -77,13 +77,25 @@ series `ibmmq:inventory:<kind>`, jobs, counted kinds) plus `instance_kind` and `
 `ibmmq.inventory.yml`, so the core's default inventory rules file is never rendered here and the
 lab stays byte-identical. Also vendored: `lib/slug.mjs` (`metricPrefix` moved there upstream so
 the core does not need the newer `burn-rules.mjs`). `tools/test-site.mjs` merges carry the
-module and assert the expected block (lab: QM1 on both jobs, host mq, queue and channel queries;
+module and assert the expected block (lab: QM1 on both jobs, no host kind, queue and channel queries;
 staging: exporter job only, QMORDS); `tools/gen-site.mjs` prints the module's title; README,
 CLAUDE.md, this file.
 
 **Evidence.** `npm test` 22/22 (lint, pack validation, pins offline, site tests incl. T10);
 `npm run generate` a no-op; `npm run site:check` ok for prod and staging; `npm run site` renders
 the lab. Observogram side: 110/110, PR #97 (core, journey check, Neuron surface).
+
+**Review fixes, re-vendored (upstream 7abc640).** The review of the Observogram branch confirmed
+five findings; the two that reach this repo: the `host` kind is opt-in now (`module.expectedKinds().host`)
+because no MQ scrape job labels `up` with `host` — every host read *silent* and the README's
+example gate would have breached on a healthy lab — so the MQ module does not declare it and
+`site.json.expected` carries qmgr, queue and channel only (hosts stay in the manifest); and the
+`expectedKinds` comment now says what the live stack shows: only the native job's `up` carries
+`qmgr` in the lab (the exporter target is deliberately unlabelled, see the deviations above), so
+`max by (qmgr)` over both jobs drops the exporter's series there and reads both in a fleet. The
+other three (the `journey list` segment, unknown `kinds` named, a failed query is not an outage)
+live in `tools/lib/inventory-coverage.mjs`, which is not vendored. Pins: `lib/site/expected.mjs`
+and `lib/site/inventory.mjs` at 7abc640; `npm test` 22/22, check-rules green, `site:check` ok.
 
 **Measured, not taken:** re-vendoring `burn-rules.mjs` / `dashboards/*` at develop bb0ad6a is not
 a no-op (see the current-state block) — it stays its own PR with a quick recertification.

@@ -280,14 +280,14 @@ test('T10 lab: the site pack equals the reference pack byte for byte; burn rules
   const exp = lab.manifest.expected;
   assert.equal(exp.series_prefix, 'ibmmq:inventory:');
   assert.deepEqual([exp.kinds.qmgr.names, exp.kinds.qmgr.jobs, exp.kinds.qmgr.series, exp.kinds.qmgr.label], [['QM1'], ['ibmmq-exporter', 'ibmmq-native'], 'ibmmq:inventory:qmgr', 'qmgr']);
-  assert.deepEqual([exp.kinds.host.names, exp.kinds.host.series], [['mq'], 'ibmmq:inventory:host']);
+  assert.equal(exp.kinds.host, undefined, 'no host kind: no MQ scrape job labels up with host, so the module does not opt in (hosts stay in the manifest)');
   assert.equal(exp.kinds.queue.per, 'qmgr');
   assert.equal(exp.kinds.queue.query, 'count by (qmgr) (last_over_time(ibmmq_queue_depth{queue=~"APP.*"}[5m]))');
   assert.equal(exp.kinds.channel.query, 'count by (qmgr) (last_over_time(ibmmq_channel_status_squash[5m]))');
   assert.deepEqual([exp.kinds.queue.min, exp.kinds.channel.min], [{}, {}], 'no floors unless params.expect declares them');
   // the module's own inventory rules file wins over the core's default (T10 twins assert its bytes)
   assert.ok(lab.files.find(f => f.path === 'prometheus/rules/ibmmq.inventory.yml').content.includes('record: ibmmq:inventory:qmgr'));
-  assert.ok(!lab.files.find(f => f.path === 'prometheus/rules/ibmmq.inventory.yml').content.includes('ibmmq:inventory:host'), 'the MQ template emits queue managers only; the host series is the core default, not rendered here');
+  assert.ok(!lab.files.find(f => f.path === 'prometheus/rules/ibmmq.inventory.yml').content.includes('ibmmq:inventory:host'), 'the MQ template emits queue managers only; there is no host series to render here');
 });
 
 test('T10 adapter: the registry sample round-trips through --registry/--adapter and names the fleet example queue managers', async () => {

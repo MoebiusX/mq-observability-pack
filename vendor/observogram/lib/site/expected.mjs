@@ -50,9 +50,12 @@ export function buildExpected({ pack, env, instanceKind, instances = [], hosts =
     }])),
   });
   kinds[kind.kind] = enumerated(kind.kind, kind.title, kind.label, instances);
-  if (kind.kind !== 'host') kinds.host = enumerated('host', 'host', 'host', hosts.map(h => ({ name: h.name, site: h.site ?? null, hosts: [], shape: null })));
-
   const extra = typeof module?.expectedKinds === 'function' ? module.expectedKinds(ctx) : null;
+  // `host` is opt-in: a journey can only observe it where some scrape job carries a `host`
+  // label on `up` (many do not — the MQ lab's targets carry qmgr, environment, site, shape), so
+  // the module says so with a `host` entry in expectedKinds; the hosts themselves stay in the
+  // manifest either way.
+  if (kind.kind !== 'host' && isObj(extra) && isObj(extra.host)) kinds.host = enumerated('host', 'host', 'host', hosts.map(h => ({ name: h.name, site: h.site ?? null, hosts: [], shape: null })));
   for (const [k, spec] of Object.entries(isObj(extra) ? extra : {})) {
     if (!IDENT.test(k)) throw new Error(`expectedKinds: kind ${JSON.stringify(k)} is not an identifier`);
     if (!isObj(spec)) throw new Error(`expectedKinds.${k}: must be an object`);
@@ -76,7 +79,11 @@ export function buildExpected({ pack, env, instanceKind, instances = [], hosts =
   return { generated_from: EXPECTED_SOURCE, environment: env, series_prefix: prefix, kinds };
 }
 
-const yamlValue = (v) => (BARE.test(String(v)) ? String(v) : JSON.stringify(String(v)));
+// A label value is written bare only when YAML reads it back as the same string: reserved
+// words (null, true, yes, …) and anything numeric-looking are quoted, whatever the pattern.
+const RESERVED = /^(null|~|true|false|yes|no|on|off|y|n)$/i;
+const NUMERIC = /^[+-]?(\.?[0-9]|0x|0o|\.inf|\.nan)/i;
+const yamlValue = (v) => (BARE.test(String(v)) && !RESERVED.test(String(v)) && !NUMERIC.test(String(v)) ? String(v) : JSON.stringify(String(v)));
 const flow = (obj) => `{ ${Object.entries(obj).map(([k, v]) => `${k}: ${yamlValue(v)}`).join(', ')} }`;
 
 /**
@@ -104,8 +111,7 @@ export function inventoryRulesYaml({ name, env, interval = '30s', expected, extr
     'groups:',
     `  - name: ${name}.inventory`,
     `    interval: ${interval}`,
-    '    rules:',
-    ...(rules.length ? rules.map(r => r.replace(/\n$/, '')) : ['      []']),
+    ...(rules.length ? ['    rules:', ...rules.map(r => r.replace(/\n$/, ''))] : ['    rules: []']),
     '',
   ].join('\n');
 }
