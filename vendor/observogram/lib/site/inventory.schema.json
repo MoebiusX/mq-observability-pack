@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://observogram.dev/schemas/site-inventory-v1.json",
   "title": "Site inventory v1",
-  "description": "One inventory file of a fleet (gen-site). Written against the JSON Schema 2020-12 subset tools/lib/validator.mjs implements (type, const, enum, pattern, required, properties, additionalProperties, propertyNames, items, minItems, $ref to local $defs). The three *Params definitions are placeholders: inventorySchema(module) replaces them with module.paramsSchema.{site,host,instance} at load time.",
+  "description": "One inventory file of a fleet (gen-site). Written against the JSON Schema 2020-12 subset tools/lib/validator.mjs implements (type, const, enum, pattern, required, properties, additionalProperties, propertyNames, items, minItems, $ref to local $defs). The three *Params definitions are placeholders: inventorySchema(module) replaces them with module.paramsSchema.{site,host,instance} at load time, merges module.instances.schema into Instance (its required keys and properties: a shape enum, for example) and moves the `instances` collection under module.instances.key (the IBM MQ module keeps `queue_managers`).",
   "type": "object",
   "required": ["inventory"],
   "additionalProperties": false,
@@ -16,7 +16,7 @@
       "additionalProperties": { "$ref": "#/$defs/Environment" }
     },
     "hosts": { "type": "array", "items": { "$ref": "#/$defs/Host" } },
-    "queue_managers": { "type": "array", "items": { "$ref": "#/$defs/QueueManager" } }
+    "instances": { "type": "array", "items": { "$ref": "#/$defs/Instance" } }
   },
   "$defs": {
     "EnvName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
@@ -70,14 +70,14 @@
         "params": { "$ref": "#/$defs/hostParams" }
       }
     },
-    "QueueManager": {
+    "Instance": {
       "type": "object",
-      "required": ["name", "shape"],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "#/$defs/Name" },
         "env": { "$ref": "#/$defs/EnvName" },
-        "shape": { "type": "string", "enum": ["container", "host", "multi-instance", "rdqm-ha", "rdqm-dr"] },
+        "shape": { "type": "string", "minLength": 1 },
         "hosts": { "type": "array", "items": { "$ref": "#/$defs/Name" } },
         "address": {
           "type": "object",

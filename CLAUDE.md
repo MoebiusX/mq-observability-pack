@@ -85,7 +85,12 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
    conditions false for the lab) or the inventory, render, copy the file into `stack/`, and
    restart the service that reads it. Anchors in `tools/site/ibmmq.mjs packSubstitutions` are
    exact-count: a pack edit that changes how often `[30s]` or `queue=~"APP.*"` occurs must update
-   the count there.
+   the count there. The vendored core is generic (it knows *instances*; `tools/site/ibmmq.mjs`
+   `instances` names them queue managers, `checkInventory` holds the MQ inventory rules,
+   `expectedKinds` says which `up` jobs carry `qmgr` and how queues / channels are counted);
+   `site.json.expected` is what an Observogram journey's `inventory:` check compares with live
+   `up` — the MQ inventory-rules template keeps emitting `ibmmq.inventory.yml` (with the Silent
+   alert), so the core's default inventory rules file is never rendered here.
 3. **No new npm dependencies in `harness/`** (Node >= 20 built-ins only). `canary/`
    may depend on `ibmmq` and `@opentelemetry/*` only.
 4. **Vendored code is read-only**: `vendor/observogram/` is refreshed by copying
