@@ -35,6 +35,22 @@ const list = (v) => (Array.isArray(v) ? v : []);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// ---------------------------------------------------------------- 2.1 what an instance is
+// The core calls them instances; this module calls them queue managers: the inventory lists
+// them under `queue_managers:`, the expected sets and the inventory series use the kind `qmgr`
+// (ibmmq:inventory:qmgr, the label every MQ series carries), and `shape` is required with the
+// five MQ shapes.
+export const instances = {
+  key: 'queue_managers',
+  kind: 'qmgr',
+  label: 'qmgr',
+  title: 'queue manager',
+  schema: {
+    required: ['shape'],
+    properties: { shape: { type: 'string', enum: ['container', 'host', 'multi-instance', 'rdqm-ha', 'rdqm-dr'] } },
+  },
+};
+
 // ---------------------------------------------------------------- 2.1 module params
 const DURATION = { type: 'string', pattern: '^[0-9]+(ms|s|m|h)$' };
 const NAME = { type: 'string', minLength: 1 };
@@ -74,9 +90,64 @@ export const paramsSchema = {
       tls: nullable({ type: 'object', required: ['ccdt_url', 'key_repository'], additionalProperties: false, properties: { ccdt_url: NAME, key_repository: NAME, cipher: NAME, sslcauth: { type: 'string', enum: ['REQUIRED', 'OPTIONAL'] } } }),
       credentials: { type: 'object', required: ['monitor_secret', 'canary_secret'], additionalProperties: false, properties: { monitor_secret: NAME, canary_secret: NAME } },
       rdqm: { type: 'object', required: ['group'], additionalProperties: false, properties: { group: NAME, dr: { type: 'boolean' } } },
+      // floors for the counted kinds of the expected sets: how many monitored queues / channels
+      // this queue manager should show (a journey's inventory check breaches below them)
+      expect: { type: 'object', additionalProperties: false, properties: { queues: { type: 'integer', minimum: 0 }, channels: { type: 'integer', minimum: 0 } } },
     },
   },
 };
+
+// ---------------------------------------------------------------- 2.3 the product's inventory rules
+// What used to sit in the generic core: an rdqm-ha queue manager needs three hosts and the
+// floating address; a dual-vantage non-container environment needs every queue manager's
+// local exporter port; client_port is unique per exporter host across environments (an
+// exporter host is a machine two environments may share; without one the port is scoped to
+// the environment); native_port is unique per host within an environment.
+export function checkInventory({ envs, itemLabel }) {
+  const errors = [];
+  const clientPortSeen = new Map();
+  for (const [env, m] of Object.entries(envs)) {
+    const nativePortSeen = new Map();
+    for (const qm of m.instances) {
+      const label = itemLabel(qm);
+      const p = isObj(qm.params) ? qm.params : {};
+      if (qm.shape === 'rdqm-ha') {
+        if (list(qm.hosts).length < 3) errors.push(`${label}: shape rdqm-ha needs at least 3 hosts, has ${list(qm.hosts).length}`);
+        if (!isObj(qm.address)) errors.push(`${label}: shape rdqm-ha needs an address (the floating IP)`);
+      }
+      if (m.vantage === 'dual' && m.profile === 'non-container' && p.native_port == null) errors.push(`${label}: environment ${env} is vantage dual with profile non-container, so params.native_port is required (the local exporter's port)`);
+      if (p.client_port != null) {
+        const eh = qm.exporter_host ?? '(no exporter_host)';
+        const key = `${qm.exporter_host ? eh : `${env}/${eh}`}:${p.client_port}`;
+        if (clientPortSeen.has(key)) errors.push(`${label}: client_port ${p.client_port} on exporter host ${eh} is also used by queue manager ${clientPortSeen.get(key)}`);
+        else clientPortSeen.set(key, qm.name);
+      }
+      if (p.native_port != null) {
+        for (const hn of list(qm.hosts)) {
+          const key = `${hn}:${p.native_port}`;
+          if (nativePortSeen.has(key)) errors.push(`${label}: native_port ${p.native_port} on host ${hn} is also used by queue manager ${nativePortSeen.get(key)}`);
+          else nativePortSeen.set(key, qm.name);
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+// ---------------------------------------------------------------- the expected sets (site.json)
+// The queue managers answer on the exporter job (and the native job in a dual vantage), where
+// `up` carries the static qmgr label (design §8). Queues and channels are counted per queue
+// manager from the exporter's gauges over the last five minutes — the inventory cannot
+// enumerate them — with floors from params.expect where a queue manager declares them.
+export function expectedKinds(ctx) {
+  const floors = (field) => Object.fromEntries(ctx.instances.filter(q => Number.isInteger(q.params?.expect?.[field])).map(q => [q.name, q.params.expect[field]]));
+  const pattern = promqlString(ctx.p.app_queue_pattern || '.*');
+  return {
+    qmgr: { jobs: ctx.vantage === 'dual' ? ['ibmmq-exporter', 'ibmmq-native'] : ['ibmmq-exporter'] },
+    queue: { title: 'queue', label: 'queue', per: 'qmgr', query: `count by (qmgr) (last_over_time(ibmmq_queue_depth{queue=~"${pattern}"}[5m]))`, min: floors('queues') },
+    channel: { title: 'channel', label: 'channel', per: 'qmgr', query: 'count by (qmgr) (last_over_time(ibmmq_channel_status_squash[5m]))', min: floors('channels') },
+  };
+}
 
 // ---------------------------------------------------------------- helpers
 const hostPort = (url) => { try { return new URL(url).host; } catch { return String(url).replace(/^[a-z]+:\/\//, '').replace(/\/.*$/, ''); } };

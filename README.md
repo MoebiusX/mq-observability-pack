@@ -166,6 +166,19 @@ names and the delta estimator. A registry becomes an inventory through a pure ad
 Not generated yet: MQSC, `qm.ini`, the local exporter and host agents (increment 2), canary
 TLS (3), RDQM signals and a failover experiment (4), delivery gates (5).
 
+**Is the right number of things being monitored?** Every partition's `site.json` carries an
+`expected` block — what the inventory says should be reporting: the queue managers by name
+(kind `qmgr`, series `ibmmq:inventory:qmgr`, the `up` series of the `ibmmq-exporter` and, in a
+dual vantage, `ibmmq-native` jobs carry the `qmgr` label), the hosts, and queues and channels
+counted per queue manager from the exporter's gauges, with floors where a queue manager declares
+`params.expect: { queues, channels }`. An Observogram journey that names the partition
+(`inventory: { site: sites/prod/site.json }`) compares those sets with the live `up` series
+through the MCP and reports, per kind, up / down / silent / unexpected; its `gate.inventory`
+turns that into a verdict, and Advanced → Neuron shows the coverage. The MQ-specific inventory
+rules (rdqm-ha hosts and address, `native_port` under a dual non-container vantage, unique
+`client_port` per exporter host) live in `tools/site/ibmmq.mjs checkInventory`; the vendored
+core knows only *instances* and lets the module call them queue managers.
+
 ### The platform's own metrics, and Observogram's reference packs
 
 Prometheus scrapes itself, Alertmanager, Grafana, Loki and Tempo (`stack/prometheus/prometheus.yml`,

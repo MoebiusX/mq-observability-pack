@@ -14,17 +14,30 @@
   five boards stay empty: no Kafka here). Last `certify:quick`: see the 2026-09-20 entry.
 - **The lab is a rendered site.** `npm run site` renders it; every generated file with a twin
   under `stack/` is byte-identical (`tools/test-site.mjs` T10, in `npm test`). The generic
-  core is Observogram's `tools/lib/site/*` (PR #90 open, vendored at `codex/gen-site` 0594723);
-  the MQ module is `tools/site/ibmmq.mjs` + `tools/site/templates/*.mjs`; inventories under
-  `sites/`; `sites/fleet-example.inventory.yaml` (prod: RDQM group behind a floating IP, TLS,
+  core is Observogram's `tools/lib/site/*` (PR #90 merged; since 2026-09-21 generic *instances*
+  with `expected.mjs`, vendored from `codex/inventory-coverage`, Observogram PR #97); the MQ
+  module is `tools/site/ibmmq.mjs` (`instances` = queue managers, `checkInventory` = the MQ
+  inventory rules, `expectedKinds` = the `up` jobs carrying `qmgr` and queues / channels counted
+  per queue manager) + `tools/site/templates/*.mjs`; inventories under `sites/`;
+  `sites/fleet-example.inventory.yaml` (prod: RDQM group behind a floating IP, TLS,
   non-container, 30 s step; staging: client exporter only) renders and validates in CI with
-  promtool / amtool / otelcol-contrib; `check-rules --site` cross-checks a partition.
+  promtool / amtool / otelcol-contrib; `check-rules --site` cross-checks a partition. Every
+  partition's `site.json.expected` is what an Observogram journey's `inventory:` check compares
+  with live `up` (per kind up / down / silent / unexpected; Advanced → Neuron shows it) — not
+  yet run against this lab: it has no MCP gateway in front of Prometheus.
 - **Generators.** Observogram library (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
   `tools/lib/site/`; PRs #87, #88, #89 (compile wiring) and #90 (gen-site core) all merged,
   `develop` a5945fb), vendored with commit and hash per file (`vendor/observogram/SOURCES.json`,
   `tools/check-pins.mjs`). **Pending re-vendor:** #89 changed `burn-rules.mjs`, `dashboards/lib.mjs`
   and `dashboards/generic.mjs` after the copies here (c42ced3 / bc36ad7); refresh them in their own
   PR and prove `npm run generate` stays a no-op (or paste the new `--pack-snippet` and recertify).
+  Measured 2026-09-21 with develop bb0ad6a: it is NOT a no-op — `ibmmq.burn.yml` loses the `slo:`
+  label on five rules (queue_headroom_99_9, message_age_99_under_60s, dlq_empty_99_9,
+  canary_latency_99_p99_500ms, log_latency_99_under_20ms), check-rules reports 5 pack-snippet
+  problems, and two new compile warnings (canary_success's derived good leg wants `or vector(0)`;
+  queue_depth_headroom's threshold direction) fail `site:check --strict`. That PR pastes the new
+  snippet, decides the two warnings in the pack, and recertifies quick on the lab. The site core
+  no longer needs it: `metricPrefix` now comes from the leaf `vendor/observogram/lib/slug.mjs`.
 - **Feedback status.** (1) fleet/site generator: increment 1 done (inventory v1, multi-environment
   inheritance and partitions, exact-count pack anchors, every stack file as a template, per-qmgr
   exporter and canary config, file_sd, inventory rules, fleet Alertmanager, registry adapter
@@ -42,6 +55,42 @@
   `rule_labels: true`); label names (`environment` / `deployment.environment` assumed); prod
   vantage (dual assumed: MQ SERVICE local exporter + client exporter); environment set
   (prod/staging/lab assumed).
+
+## 2026-09-21 — inventory coverage: the site's expected sets, for Neuron to check
+
+**Ask:** "Neuron also needs to check the right number of servers/brokers/queues are being
+monitored" — the inventory existed only as a CLI input here; nothing declared to Observogram how
+many queue managers should report.
+
+**What changed here.** The vendored site core (`vendor/observogram/lib/site/`, Observogram
+`codex/inventory-coverage`, PR #97) is generic now: it knows *instances*, and the module says what
+one is. `tools/site/ibmmq.mjs` gained `instances` (key `queue_managers`, kind/label `qmgr`, title
+"queue manager", `shape` required with the five MQ shapes), `checkInventory` (the MQ rules that
+used to sit in the core: rdqm-ha hosts and address, `native_port` under dual + non-container,
+`client_port` per exporter host, `native_port` per host — same messages), `expectedKinds` (queue
+managers answer on `ibmmq-exporter` and, dual vantage, `ibmmq-native`; queues and channels counted
+per queue manager from `ibmmq_queue_depth{queue=~<app_queue_pattern>}` and
+`ibmmq_channel_status_squash` over 5 m, floors from the new optional instance param
+`expect: { queues, channels }`). Every partition's `site.json` now carries `expected` (names,
+series `ibmmq:inventory:<kind>`, jobs, counted kinds) plus `instance_kind` and `instances` (with
+`queue_managers` kept as the alias); the MQ inventory-rules template still emits
+`ibmmq.inventory.yml`, so the core's default inventory rules file is never rendered here and the
+lab stays byte-identical. Also vendored: `lib/slug.mjs` (`metricPrefix` moved there upstream so
+the core does not need the newer `burn-rules.mjs`). `tools/test-site.mjs` merges carry the
+module and assert the expected block (lab: QM1 on both jobs, host mq, queue and channel queries;
+staging: exporter job only, QMORDS); `tools/gen-site.mjs` prints the module's title; README,
+CLAUDE.md, this file.
+
+**Evidence.** `npm test` 22/22 (lint, pack validation, pins offline, site tests incl. T10);
+`npm run generate` a no-op; `npm run site:check` ok for prod and staging; `npm run site` renders
+the lab. Observogram side: 110/110, PR #97 (core, journey check, Neuron surface).
+
+**Measured, not taken:** re-vendoring `burn-rules.mjs` / `dashboards/*` at develop bb0ad6a is not
+a no-op (see the current-state block) — it stays its own PR with a quick recertification.
+
+**Not done.** No journey has run against this lab: the lab exposes Prometheus, not an MCP
+gateway, so the check is proven upstream against a fake MCP only. No inventory here declares
+`expect` floors yet. Increments 2-5 of gen-site unchanged.
 
 ## 2026-09-20 — the lab scrapes its own platform; Observogram's grafana and prometheus packs validated live
 

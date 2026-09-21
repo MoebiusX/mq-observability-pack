@@ -46,6 +46,8 @@ const labText = rd('sites/lab.inventory.yaml');
 const fleetDoc = parseYaml(fleetText);
 const ENVS = '[prod, staging, lab]';
 const files = (...docs) => docs.map((d, i) => ({ name: `f${i}.yaml`, doc: d }));
+// The module owns the instances key (queue_managers), so every merge carries it.
+const merge = (f, opts = {}) => mergeInventories(f, { module, ...opts });
 const loadAll = (inputs) => loadInventories(inputs, { schema: invSchema, module });
 const runWith = (inventories, env, extra = {}) => run({ pack, packText, schema, inventorySchema: invSchema, inventories, env, module, lib, ...extra });
 const stripHeader = (t) => t.split('\n').filter(l => !l.startsWith('#')).join('\n');
@@ -62,7 +64,7 @@ const byEnv = (env, fileEnv) => ({
 test('T1 merge: prod file (file-level env) + staging file = the fleet example', () => {
   const l = loadAll([{ name: 'prod.yaml', doc: byEnv('prod', true) }, { name: 'staging.yaml', doc: byEnv('staging', false) }]);
   assert.deepEqual(l.errors, []);
-  const m = mergeInventories(l.files);
+  const m = merge(l.files);
   assert.deepEqual(m.errors, []);
   assert.equal(m.inventory.hosts.length, 5);
   assert.deepEqual(m.inventory.queue_managers.map(q => q.name), ['QMORD1', 'QMPAY1', 'QMORDS']);
@@ -72,7 +74,7 @@ test('T1 merge: prod file (file-level env) + staging file = the fleet example', 
   assert.deepEqual(v.errors, []);
   const { envs, errors } = resolveEnvironments(m.inventory, pack);
   assert.deepEqual(errors, []);
-  const single = resolveEnvironments(mergeInventories(loadAll([{ name: 'fleet.yaml', text: fleetText }]).files).inventory, pack).envs;
+  const single = resolveEnvironments(merge(loadAll([{ name: 'fleet.yaml', text: fleetText }]).files).inventory, pack).envs;
   for (const e of ['prod', 'staging']) {
     assert.deepEqual(envs[e].queue_managers.map(q => [q.name, q.env, q.exporter_host, q.site]), single[e].queue_managers.map(q => [q.name, q.env, q.exporter_host, q.site]));
     assert.deepEqual(envs[e].hosts.map(h => h.name), single[e].hosts.map(h => h.name));
@@ -84,7 +86,7 @@ test('T1 merge: prod file (file-level env) + staging file = the fleet example', 
 test('T1 merge: a queue manager declared twice in one environment is an error naming both files', () => {
   const a = { inventory: 'v1', env: 'prod', queue_managers: [{ name: 'QM1', shape: 'host' }] };
   const b = { inventory: 'v1', env: 'prod', queue_managers: [{ name: 'QM1', shape: 'host' }] };
-  const m = mergeInventories([{ name: 'a.yaml', doc: a }, { name: 'b.yaml', doc: b }]);
+  const m = merge([{ name: 'a.yaml', doc: a }, { name: 'b.yaml', doc: b }]);
   const all = [...m.errors, ...resolveEnvironments(m.inventory, pack).errors, ...validateInventory(m.inventory, pack, { module }).errors];
   assert.ok(all.some(e => /queue manager QM1/.test(e) && /a\.yaml/.test(e) && /b\.yaml/.test(e)), all.join('\n'));
 });
@@ -92,7 +94,7 @@ test('T1 merge: a queue manager declared twice in one environment is an error na
 // ----------------------------------------------------------------- T2 inheritance
 test('T2 inheritance: a queue manager without env takes the unique env of its hosts', () => {
   const doc = { inventory: 'v1', env: 'lab', environments: { prod: fleetDoc.environments.prod, lab: {} }, hosts: [{ name: 'h1', env: 'prod' }, { name: 'h2', env: 'prod' }], queue_managers: [{ name: 'Q', shape: 'host', hosts: ['h1', 'h2'] }] };
-  const { envs, errors } = resolveEnvironments(mergeInventories(files(doc)).inventory, pack);
+  const { envs, errors } = resolveEnvironments(merge(files(doc)).inventory, pack);
   assert.deepEqual(errors, []);
   assert.equal(envs.prod.queue_managers[0].env, 'prod');
   assert.equal(envs.lab, undefined);
@@ -100,21 +102,21 @@ test('T2 inheritance: a queue manager without env takes the unique env of its ho
 
 test('T2 inheritance: hosts that disagree, qm.env that differs from its hosts, and an orphan host are errors naming the items', () => {
   const disagree = { inventory: 'v1', environments: { prod: {}, staging: {} }, hosts: [{ name: 'h1', env: 'prod' }, { name: 'h2', env: 'staging' }], queue_managers: [{ name: 'Q', shape: 'host', hosts: ['h1', 'h2'] }] };
-  assert.match(resolveEnvironments(mergeInventories(files(disagree)).inventory, pack).errors[0], /queue manager Q \(f0\.yaml\): its hosts disagree on env: h1=prod, h2=staging/);
+  assert.match(resolveEnvironments(merge(files(disagree)).inventory, pack).errors[0], /queue manager Q \(f0\.yaml\): its hosts disagree on env: h1=prod, h2=staging/);
   const differs = { inventory: 'v1', environments: { prod: {}, staging: {} }, hosts: [{ name: 'h1', env: 'prod' }], queue_managers: [{ name: 'Q', env: 'staging', shape: 'host', hosts: ['h1'] }] };
-  assert.match(resolveEnvironments(mergeInventories(files(differs)).inventory, pack).errors[0], /queue manager Q \(f0\.yaml\): env staging differs from its hosts' env prod \(h1\)/);
+  assert.match(resolveEnvironments(merge(files(differs)).inventory, pack).errors[0], /queue manager Q \(f0\.yaml\): env staging differs from its hosts' env prod \(h1\)/);
   const orphan = { inventory: 'v1', environments: { prod: {} }, hosts: [{ name: 'orphan' }], queue_managers: [{ name: 'Q', shape: 'host', hosts: ['orphan'] }] };
-  const errors = resolveEnvironments(mergeInventories(files(orphan)).inventory, pack).errors;
+  const errors = resolveEnvironments(merge(files(orphan)).inventory, pack).errors;
   assert.ok(errors.some(e => /host orphan \(f0\.yaml\): no env and its file declares none/.test(e)), errors.join('\n'));
 });
 
 // ----------------------------------------------------------------- T3 names
 test('T3 names: an environment outside metadata.bindings.environments is an error quoting the pack list', () => {
   const item = { inventory: 'v1', env: 'uat', environments: { uat: { endpoints: { remote_write: 'http://x' }, params: fleetDoc.environments.staging.params } }, hosts: [{ name: 'h1' }], queue_managers: [{ name: 'Q', shape: 'host', hosts: ['h1'], params: fleetDoc.queue_managers[2].params }] };
-  const v = validateInventory(mergeInventories(files(item)).inventory, pack, { schema: invSchema, module });
+  const v = validateInventory(merge(files(item)).inventory, pack, { schema: invSchema, module });
   assert.ok(v.errors.includes(`environment uat: not in the pack's metadata.bindings.environments ${ENVS}`), v.errors.join('\n'));
   const block = { inventory: 'v1', env: 'lab', environments: { lab: parseYaml(labText).environments.lab, uat: {} }, hosts: [{ name: 'mq' }], queue_managers: [{ name: 'QM1', shape: 'container', hosts: ['mq'], params: parseYaml(labText).queue_managers[0].params }] };
-  const w = validateInventory(mergeInventories(files(block)).inventory, pack, { schema: invSchema, module });
+  const w = validateInventory(merge(files(block)).inventory, pack, { schema: invSchema, module });
   assert.ok(w.errors.includes(`environment uat: not in the pack's metadata.bindings.environments ${ENVS}`), w.errors.join('\n'));
   assert.deepEqual(w.errors.filter(e => !/uat/.test(e)), []);
 });
@@ -272,6 +274,20 @@ test('T10 lab: the site pack equals the reference pack byte for byte; burn rules
   assert.deepEqual(lab.manifest.harness.services, ['ibmmq', 'mq-canary', 'orders-producer', 'orders-consumer']);
   assert.deepEqual(lab.manifest.harness.names.svrconns, ['DEV.ADMIN.SVRCONN', 'DEV.APP.SVRCONN']);
   assert.equal(lab.manifest.timing.rendered.gate, '1m'); assert.equal(lab.manifest.burn.lab, true);
+  // the expected sets a journey checks coverage against (vendor/observogram/lib/site/expected.mjs)
+  assert.deepEqual(lab.manifest.instance_kind, { key: 'queue_managers', kind: 'qmgr', label: 'qmgr', title: 'queue manager' });
+  assert.equal(lab.manifest.queue_managers, lab.manifest.instances, 'the manifest keeps queue_managers as the alias of instances');
+  const exp = lab.manifest.expected;
+  assert.equal(exp.series_prefix, 'ibmmq:inventory:');
+  assert.deepEqual([exp.kinds.qmgr.names, exp.kinds.qmgr.jobs, exp.kinds.qmgr.series, exp.kinds.qmgr.label], [['QM1'], ['ibmmq-exporter', 'ibmmq-native'], 'ibmmq:inventory:qmgr', 'qmgr']);
+  assert.deepEqual([exp.kinds.host.names, exp.kinds.host.series], [['mq'], 'ibmmq:inventory:host']);
+  assert.equal(exp.kinds.queue.per, 'qmgr');
+  assert.equal(exp.kinds.queue.query, 'count by (qmgr) (last_over_time(ibmmq_queue_depth{queue=~"APP.*"}[5m]))');
+  assert.equal(exp.kinds.channel.query, 'count by (qmgr) (last_over_time(ibmmq_channel_status_squash[5m]))');
+  assert.deepEqual([exp.kinds.queue.min, exp.kinds.channel.min], [{}, {}], 'no floors unless params.expect declares them');
+  // the module's own inventory rules file wins over the core's default (T10 twins assert its bytes)
+  assert.ok(lab.files.find(f => f.path === 'prometheus/rules/ibmmq.inventory.yml').content.includes('record: ibmmq:inventory:qmgr'));
+  assert.ok(!lab.files.find(f => f.path === 'prometheus/rules/ibmmq.inventory.yml').content.includes('ibmmq:inventory:host'), 'the MQ template emits queue managers only; the host series is the core default, not rendered here');
 });
 
 test('T10 adapter: the registry sample round-trips through --registry/--adapter and names the fleet example queue managers', async () => {
@@ -448,6 +464,9 @@ test('T9 templates (vantage single): the degraded rule set, the inventory join, 
   assert.equal(countMatches(fileOf(p, 'prometheus/rules/ibmmq.recording.yml'), 'qmgr_process_up'), 0);
   const inv = fileOf(p, 'prometheus/rules/ibmmq.inventory.yml');
   assert.ok(inv.includes('- alert: IBMMQQueueManagerSilent') && inv.includes('expr: ibmmq:inventory:qmgr unless on (qmgr) up{job="ibmmq-exporter"}') && inv.includes('runbook: runbooks/qmgr-silent.md'));
+  // a single vantage has no native job: the expected set says the exporter job alone carries the qmgr label
+  assert.deepEqual(p.manifest.expected.kinds.qmgr.jobs, ['ibmmq-exporter']);
+  assert.deepEqual(p.manifest.expected.kinds.qmgr.names, ['QMORDS']);
   assert.ok(inv.includes('labels: { qmgr: QMORDS, environment: staging, site: dc1, shape: host, vantage: single }'));
   const tests = fileOf(p, 'prometheus/tests/ibmmq.alerts.test.yml');
   for (const marker of ['# (i) single vantage', '# (ii) a status blip', '# (iii) no MQ telemetry', '# (iv) the inventory says QMORDS exists', '# (v) uptime below four scrapes', '# M22']) assert.ok(tests.includes(marker), marker);
