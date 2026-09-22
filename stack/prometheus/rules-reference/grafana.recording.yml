@@ -1,5 +1,5 @@
 # Recording rules of Observogram's grafana reference pack (grafana 1.0.0), materialised by
-# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git codex/refpacks-live-names (3814a79) reference-packs/grafana.pack.yaml
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (9c4f827) reference-packs/grafana.pack.yaml
 # spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
 # ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
 # edit: rerun the tool. Skipped (the policy generates them with labels): grafana:errorbudget:burn_1h.
