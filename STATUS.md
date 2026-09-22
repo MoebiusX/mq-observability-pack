@@ -2,16 +2,20 @@
 
 ## Current state (rewritten each session; the dated log below is history)
 
-- **Branches.** `main` = PR #7 merge (2026-09-17 12:57Z). `develop` = PR #8 + PR #9 merged
-  (2026-09-17 21:51Z: pin drift, gen-site increment 1). `feat/platform-self-metrics` (2026-09-20):
-  the lab scrapes its own platform components and validates Observogram's grafana and prometheus
-  reference packs live; PR into `develop` to open. Tag `v0.2.0` = PR #3 merge.
+- **Branches.** `main` = PR #11 merge (develop → main, 2026-09-21). `develop` = PR #12 merged
+  (2026-09-21 14:26Z: the site's expected sets, core re-vendored at Observogram 7abc640).
+  `feat/kafka-node` (2026-09-22): a single Kafka node and the activity a real Grafana has, so the
+  lab validates Observogram's kafka, grafana and prometheus reference packs live; PR open. Tag
+  `v0.2.0` = PR #3 merge.
 - **Lab.** Up on Nitro5 since 2026-09-16; runs the files gen-site renders from
   `sites/lab.inventory.yaml`. Since 2026-09-20 12:08Z Prometheus also scrapes Grafana, Loki and
   Tempo (job names `prometheus-self`, `alertmanager`, `grafana`, `loki`, `tempo`) and loads
-  `stack/prometheus/rules-reference/` (the grafana and prometheus reference packs' rules, 95 rules,
-  all healthy). Grafana's "Reference packs (generated)" folder now shows data for both packs (kafka's
-  five boards stay empty: no Kafka here). Last `certify:quick`: see the 2026-09-20 entry.
+  `stack/prometheus/rules-reference/`. Since 2026-09-22 13:50Z it also scrapes the lab's own Kafka
+  node (jobs `kafka-broker`, `kafka-exporter`; services `kafka`, `kafka-exporter`, `kafka-gen`) and
+  the kafka reference pack's rules are materialised too; Grafana was recreated at 13:48Z with a
+  data volume, anonymous Viewer, `instrument_queries`, tracing to Tempo, one Grafana-managed
+  heartbeat rule and a form-login canary. Last `certify:quick`: PASS 16/16 at 2026-09-22 14:05:46Z
+  (see the 2026-09-22 entry).
 - **The lab is a rendered site.** `npm run site` renders it; every generated file with a twin
   under `stack/` is byte-identical (`tools/test-site.mjs` T10, in `npm test`). The generic
   core is Observogram's `tools/lib/site/*` (PR #90 merged; since 2026-09-21 generic *instances*
@@ -55,6 +59,73 @@
   `rule_labels: true`); label names (`environment` / `deployment.environment` assumed); prod
   vantage (dual assumed: MQ SERVICE local exporter + client exporter); environment set
   (prod/staging/lab assumed).
+
+## 2026-09-22 — a Kafka node in the lab, and why the reference-pack boards were empty
+
+**Ask:** deploy a simple Kafka node with monitoring, explain the empty panels on the grafana and
+prometheus reference boards, and produce screenshots with rich data.
+
+**Why the panels were empty (measured, per panel, every board of both packs).** Four causes, none
+of them the lab's telemetry: (1) five SLIs name metric families this Grafana 12.4.11 / Prometheus
+3.14.0 do not expose under that name — grafana `grafana_database_query_duration_seconds_bucket`
+(the real histogram is `grafana_database_queries_duration_seconds`, off unless
+`[database] instrument_queries = true`), grafana login (`grafana_api_login_post` without `_total`,
+`grafana_user_login_errors_total` does not exist), prometheus `scrape_duration_seconds_bucket`
+(a gauge, no histogram) and `prometheus_engine_query_duration_seconds_bucket` (a summary); (2) the
+family exists but nothing moved it — grafana alerting evaluation counters register only once a
+Grafana-managed rule evaluates, and there were none; (3) the §10 certification row selects
+`{job="certification", pack="grafana"}` — the alert-sink emits no `pack` label and no harness ever
+certified those packs, so 13 tiles per unified board are empty by construction; (4) alert tables
+with nothing firing, and "Recent traces" with no Grafana/Prometheus traces in Tempo. The kafka
+boards were empty because there was no Kafka.
+
+**Done here (`feat/kafka-node`, commit 25d7816 + this one).** `stack/kafka/`: Apache Kafka 3.9.2
+in KRaft mode, one node, RF 1, with jmx_exporter 1.6.0 as a javaagent under the Strimzi rule set
+(verbatim, provenance in the file header) on :9404, kafka_exporter v1.10.0 on :9308, and `gen.sh`
+(topics `orders` 50 msg/s and `payments` 10 msg/s from `kafka-producer-perf-test`, a committing
+console-consumer group on each). Prometheus scrapes both directly (template `prometheus.mjs`,
+lab-only, T10 byte-identical), `service: kafka` on the targets; `tools/reference-packs.mjs`
+validates kafka by default. Grafana: anonymous Viewer, `GF_DATABASE_INSTRUMENT_QUERIES`, its own
+traces to Tempo, `provisioning/alerting/heartbeat.yaml` (a real rule: fires if Prometheus stops
+scraping itself), `grafana-login-canary` (one POST /login every 5 min, the grafana pack's declared
+synthetic), `grafana-data` volume. Prometheus `tracing:` to the collector at 0.25. Pins
+`KAFKA_TAG`, `KAFKA_EXPORTER_TAG`, `CURL_TAG` in `.env.example`. Docs: README, CLAUDE.md,
+ARCHITECTURE. Screenshots are taken with a headless Chrome container on the compose network
+(`zenika/alpine-chrome:124`, `--screenshot`, 1920 px, kiosk URLs; not part of the stack).
+
+**Measured.** Kafka: 6589 `kafka_*` series 15 s after the reload, both targets up, orders
+48.8 msg/s, payments 9.8 msg/s, lag 31 / 7; broker 460 MB RSS, 6 % CPU steady (100 % for the first
+minutes: JIT). Grafana: `grafana_database_queries_duration_seconds_bucket` 22 series,
+`grafana_alerting_rule_evaluations_total` after the first evaluation, `grafana_api_login_post_total`
+= `grafana_authn_authn_successful_login_total{client="auth.client.form"}` =
+`grafana_http_request_duration_seconds_count{handler="/login",method="POST",status_code="200"}`
+= 2 after two canary logins (basic auth moves none of them). Prometheus and Grafana traces
+searchable in Tempo. Grafana's first start on the fresh volume outran the 135 s healthcheck window
+(SQLite migrations, `database is locked`), restarted twice, then healthy; the login canary had to
+be started again afterwards. `npm run certify:quick` **PASS 16/16 at 14:05:46Z** after the
+documented collector restart (its counter carried 89 stale failed points from before 2026-09-21;
+`increase(...[24h]) == 0`). Reference-pack validation against origin/develop 54223dd (13:55Z):
+grafana 13/16 rules producing, prometheus 11/15, kafka 8/14 — exactly the metric-name SLIs and
+the certification row; the grafana alerting-evaluation panels now have data.
+
+**Upstream (Observogram, in flight).** The name fixes belong in the packs with the live exposition
+as evidence: prometheus (scrape duration as `quantile_over_time` of the gauge, query latency from
+`prometheus_http_request_duration_seconds_bucket`), grafana (`grafana_database_queries_duration_seconds`
++ the prerequisite, login from the POST /login request counts), kafka (the Strimzi names:
+`kafka_network_requestmetrics_totaltimems{request="Produce",quantile="0.99"}` for produce,
+`_localtimems{request="FetchConsumer"}` for fetch — TotalTime includes the long-poll wait,
+measured 100 ms p99 on an idle topic — `kafka_controller_kafkacontroller_newactivecontrollerscount`
+for elections on KRaft, `kafka_server_brokertopicmetrics_messagesin_total` per topic; no `_bucket`
+exists for any Kafka request metric), and `generic.mjs` rendering the §10 row only for a pack that
+declares a `certification` scrape job (a note otherwise; the `pack=` matcher stays, so the MQ verdict
+never shows on another pack's board). Branch `codex/refpacks-live-names`; re-import here with
+`node tools/reference-packs.mjs --ref origin/codex/refpacks-live-names --import --validate` once
+pushed, then rerun with `origin/develop` after the merge and commit the materialised rules.
+
+**Not done.** No OTel-instrumented Kafka client (the kafka pack's "Recent traces" stays empty by
+design); no Kafka fault injection (its alert panels show "no alert" honestly); the `mq_cert_*`
+series still carry no `pack` label (contract alignment, separate change); `sites/lab/` stays
+untracked.
 
 ## 2026-09-21 — inventory coverage: the site's expected sets, for Neuron to check
 

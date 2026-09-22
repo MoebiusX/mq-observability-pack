@@ -1,5 +1,5 @@
 # Recording rules of Observogram's prometheus reference pack (prometheus 1.0.0), materialised by
-# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (a5945fb) reference-packs/prometheus.pack.yaml
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (54223dd) reference-packs/prometheus.pack.yaml
 # spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
 # ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
 # edit: rerun the tool. Skipped (the policy generates them with labels): prometheus:errorbudget:burn_1h.
