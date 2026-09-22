@@ -26,9 +26,31 @@ export function render(ctx) {
     ...(grafana ? [selfJob('grafana', grafana)] : []),
     ...(ctx.lab ? [selfJob('loki', 'http://loki:3100'), selfJob('tempo', 'http://tempo:3200')] : []),
   ].join('');
+  // The lab's Kafka node (Observogram's kafka reference pack, validated live the same way): the
+  // broker's JMX exporter and kafka_exporter, under the job names the pack's SLIs select on.
+  const kafka = ctx.lab ? `  # Observogram's kafka reference pack: the lab's single Kafka node (broker MBeans through the JMX
+  # exporter javaagent, topics and consumer groups through kafka_exporter); the job names are the
+  # ones the pack's SLIs select on. Not part of the MQ pack.
+  - job_name: kafka-broker
+    static_configs:
+      - targets: [ "kafka:9404" ]
+        labels: { service: kafka }
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: [ "kafka-exporter:9308" ]
+        labels: { service: kafka }
+` : '';
+  // Prometheus' own traces to Tempo through the collector (the prometheus reference pack's
+  // "Recent traces" panel reads them); a quarter of requests is plenty for a lab.
+  const tracing = ctx.lab ? `
+tracing:
+  endpoint: otel-collector:4317
+  insecure: true
+  sampling_fraction: 0.25
+` : '';
   return `# Prometheus for the MQ ${ctx.lab ? 'lab' : `${ctx.env} site`}. All application metrics arrive via remote-write
 # from the OTel Collector; Prometheus scrapes only itself and the platform's own components
-# (Alertmanager${grafana ? ', Grafana' : ''}${ctx.lab ? ', Loki, Tempo' : ''}).
+# (Alertmanager${grafana ? ', Grafana' : ''}${ctx.lab ? ', Loki, Tempo' : ''})${ctx.lab ? ' and the lab\'s Kafka node' : ''}.
 global:
   scrape_interval: ${step}
   evaluation_interval: ${step}
@@ -45,12 +67,12 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets: [ "${hostPort(am)}" ]${isHttps(am) ? '\n      scheme: https' : ''}
-
+${tracing}
 scrape_configs:
   # prometheus-self: the job name Observogram's prometheus reference pack declares for a Prometheus
   # scraping itself (its pipelines panels select on it); nothing in the MQ pack reads this job.
   - job_name: prometheus-self
     static_configs:
       - targets: [ "127.0.0.1:9090" ]
-${platform}`;
+${platform}${kafka}`;
 }

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * tools/reference-packs.mjs — validate Observogram's reference packs (grafana, prometheus) live,
- * against this lab's own platform components.
+ * tools/reference-packs.mjs — validate Observogram's reference packs (grafana, prometheus, kafka)
+ * live, against this lab's own platform components and its Kafka node.
  *
- * The lab scrapes Prometheus, Alertmanager, Grafana, Loki and Tempo (stack/prometheus/prometheus.yml,
- * rendered by tools/site/templates/prometheus.mjs). Observogram's reference packs describe two of
- * those components; their generated boards read the packs' recording rules and the policy's
+ * The lab scrapes Prometheus, Alertmanager, Grafana, Loki, Tempo and its own Kafka node
+ * (stack/prometheus/prometheus.yml, rendered by tools/site/templates/prometheus.mjs). Observogram's
+ * reference packs describe three of those; their generated boards read the packs' recording rules and the policy's
  * error-budget records, so without those rules loaded every panel is empty. This tool:
  *
  *   1. reads each pack, its generated burn-rate rules and its boards from an Observogram git ref
@@ -24,7 +24,7 @@
  *      lab has no such traffic) and which error. Errors fail the run; empties are listed.
  *
  *   node tools/reference-packs.mjs [--observogram ../Observogram] [--ref origin/develop]
- *        [--packs grafana,prometheus] [--out stack/prometheus/rules-reference]
+ *        [--packs grafana,prometheus,kafka] [--out stack/prometheus/rules-reference]
  *        [--import] [--validate] [--wait 150] [--no-reload]
  *   npm run refpacks            # --import --validate
  *
@@ -44,7 +44,7 @@ const has = (n) => argv.includes(n);
 if (has('--help') || has('-h')) { console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 32).join('\n')); process.exit(0); }
 const OG = resolve(ROOT, opt('--observogram', '../Observogram'));
 const REF = opt('--ref', 'origin/develop');
-const PACKS = opt('--packs', 'grafana,prometheus').split(',').map(s => s.trim()).filter(Boolean);
+const PACKS = opt('--packs', 'grafana,prometheus,kafka').split(',').map(s => s.trim()).filter(Boolean);
 const OUT = resolve(ROOT, opt('--out', 'stack/prometheus/rules-reference'));
 const WAIT = Number(opt('--wait', '150'));
 const PROM = process.env.PROM_URL || 'http://127.0.0.1:29090';

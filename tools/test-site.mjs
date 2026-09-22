@@ -375,6 +375,10 @@ test('T10 templates: the environment wiring the lab carries (what the transition
   // the platform's own metrics (what the Observogram reference packs read) and the reference rules directory
   for (const job of ['alertmanager:9093', 'grafana:3000', 'loki:3100', 'tempo:3200']) assert.ok(prom.includes(`- targets: [ "${job}" ]`), job);
   assert.ok(prom.includes('  - /etc/prometheus/rules-reference/*.yml\n'));
+  // the lab's Kafka node (the kafka reference pack's target) and Prometheus' own traces are lab-only
+  assert.ok(prom.includes('  - job_name: kafka-broker\n    static_configs:\n      - targets: [ "kafka:9404" ]\n        labels: { service: kafka }\n'));
+  assert.ok(prom.includes('  - job_name: kafka-exporter\n    static_configs:\n      - targets: [ "kafka-exporter:9308" ]\n'));
+  assert.ok(prom.includes('\ntracing:\n  endpoint: otel-collector:4317\n  insecure: true\n  sampling_fraction: 0.25\n'));
   assert.ok(fileOf(lab, 'alertmanager/alertmanager.yml').includes('- matchers: [ environment = "lab", severity = SEV1 ]'));
   void expectDeviation;
 });
@@ -386,6 +390,7 @@ test('prometheus.yml per environment: Grafana is scraped where the environment n
   assert.ok(!staging.includes('job_name: grafana'), 'staging declares no Grafana endpoint');
   for (const text of [prod, staging]) {
     assert.ok(!text.includes('job_name: loki') && !text.includes('job_name: tempo') && !text.includes('rules-reference'), 'lab-only jobs and rules stay in the lab');
+    assert.ok(!text.includes('job_name: kafka') && !text.includes('\ntracing:'), 'the Kafka jobs and the tracing block are lab-only');
     assert.ok(text.includes('- job_name: prometheus-self\n') && text.includes('- job_name: alertmanager\n'), 'the self-scrape job carries the reference pack\'s name');
   }
 });
