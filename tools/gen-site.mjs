@@ -112,7 +112,7 @@ const write = !(opts.check || opts['dry-run']);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 for (const [env, p] of Object.entries(r.partitions)) {
   const m = p.manifest;
-  console.log(`${env}: ${plural(m.queue_managers.length, 'queue manager')}, ${plural(m.hosts.length, 'host')}, ${p.files.length} files → ${write ? resolve(out, env) : '(not written)'} (step ${m.timing.step}s, vantage ${m.vantage}, profile ${m.profile}, burn ${m.burn.alerts} alerts/${m.burn.recording} recording${m.removed.length ? `, removed ${m.removed.join('; ')}` : ''})`);
+  console.log(`${env}: ${plural(m.instances.length, m.instance_kind?.title || 'instance')}, ${plural(m.hosts.length, 'host')}, ${p.files.length} files → ${write ? resolve(out, env) : '(not written)'} (step ${m.timing.step}s, vantage ${m.vantage}, profile ${m.profile}, burn ${m.burn.alerts} alerts/${m.burn.recording} recording${m.removed.length ? `, removed ${m.removed.join('; ')}` : ''})`);
   if (opts['dry-run']) for (const f of p.files) console.log(`  ${env}/${f.path}`);
   if (write) for (const f of p.files) { const target = resolve(out, env, f.path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, f.content); }
 }

@@ -1,0 +1,41 @@
+# One Grafana-managed alert rule, so Grafana's alerting engine has something to evaluate.
+#
+# Observogram's grafana reference pack reads grafana_alerting_rule_evaluations_total and
+# _failures_total; Grafana registers those counters only once a Grafana-managed rule has been
+# evaluated (the lab's alerts live in Prometheus, so before this file there were none). The rule
+# is a real one: it fires if Prometheus stops scraping itself. Lab timing (10 s) like the rest.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: platform-heartbeat
+    folder: Platform
+    interval: 10s
+    rules:
+      - uid: prometheus-self-scrape-down
+        title: Prometheus self-scrape down (Grafana-managed)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prom
+            model:
+              refId: A
+              instant: true
+              expr: up{job="prometheus-self"}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+        noDataState: Alerting
+        execErrState: Error
+        for: 30s
+        labels:
+          pack: platform
+          severity: SEV2
+        annotations:
+          summary: Prometheus is not scraping itself
+          description: "up{job=\"prometheus-self\"} is 0 or absent as evaluated by Grafana's own alerting engine; the reference pack's alerting-evaluation SLI reads this rule's evaluations."

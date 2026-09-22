@@ -54,7 +54,7 @@ fires when the first is fine and the second is not. The chaos suite proves both
 
 | | |
 |---|---|
-| Grafana | http://127.0.0.1:23000 (admin / admin) — start at `/d/ibmmq-unified` |
+| Grafana | http://127.0.0.1:23000 (admin / admin; anonymous Viewer can read every board) — start at `/d/ibmmq-unified` |
 | Prometheus | http://127.0.0.1:29090 |
 | Alertmanager | http://127.0.0.1:29093 |
 | Tempo | http://127.0.0.1:23200 (API only — explore traces in Grafana) |
@@ -62,6 +62,7 @@ fires when the first is fine and the second is not. The chaos suite proves both
 | MQ console | https://127.0.0.1:29443/ibmmq/console (admin / passw0rd) |
 | MQ listener | 127.0.0.1:21414 (`DEV.APP.SVRCONN`, app / passw0rd) |
 | alert-sink ledger | http://127.0.0.1:29095/events · `/metrics` exposes the last certification run (verdict, MTTD/MTTR per alert) for the boards |
+| Kafka (reference-pack target) | 127.0.0.1:29092 (EXTERNAL listener, plaintext) · broker metrics http://127.0.0.1:29404/metrics · kafka_exporter http://127.0.0.1:29308/metrics |
 
 ## Harness
 
@@ -166,24 +167,52 @@ names and the delta estimator. A registry becomes an inventory through a pure ad
 Not generated yet: MQSC, `qm.ini`, the local exporter and host agents (increment 2), canary
 TLS (3), RDQM signals and a failover experiment (4), delivery gates (5).
 
+**Is the right number of things being monitored?** Every partition's `site.json` carries an
+`expected` block — what the inventory says should be reporting: the queue managers by name
+(kind `qmgr`, series `ibmmq:inventory:qmgr`, the `up` series of the `ibmmq-exporter` and, in a
+dual vantage, `ibmmq-native` jobs carry the `qmgr` label; in the lab only the native one does,
+the exporter target is deliberately unlabelled), and queues and channels counted per queue
+manager from the exporter's gauges, with floors where a queue manager declares
+`params.expect: { queues, channels }`. An Observogram journey that names the partition
+(`inventory: { site: sites/prod/site.json }`) compares those sets with the live `up` series
+through the MCP and reports, per kind, up / down / silent / unexpected; its `gate.inventory`
+turns that into a verdict, and Advanced → Neuron shows the coverage. The MQ-specific inventory
+rules (rdqm-ha hosts and address, `native_port` under a dual non-container vantage, unique
+`client_port` per exporter host) live in `tools/site/ibmmq.mjs checkInventory`; the vendored
+core knows only *instances* and lets the module call them queue managers.
+
 ### The platform's own metrics, and Observogram's reference packs
 
 Prometheus scrapes itself, Alertmanager, Grafana, Loki and Tempo (`stack/prometheus/prometheus.yml`,
 rendered from the lab inventory: Grafana wherever an environment names one, Loki and Tempo in the
-lab). That makes the lab a live test bed for Observogram's `grafana` and `prometheus` reference
-packs: `npm run refpacks` (`tools/reference-packs.mjs`) reads the packs, their generated burn-rate
-rules and boards from an Observogram git ref (`--observogram ../Observogram --ref origin/develop`),
-materialises the packs' recording rules into `stack/prometheus/rules-reference/` (a directory
-Prometheus loads and `check-rules` ignores), imports the boards into Grafana's "Reference packs
-(generated)" folder and reports which recording rules produce samples and which board panels
-return data, are empty or error.
+lab), and in the lab a single Kafka node. That makes the lab a live test bed for Observogram's
+`grafana`, `prometheus` and `kafka` reference packs: `npm run refpacks` (`tools/reference-packs.mjs`)
+reads the packs, their generated burn-rate rules and boards from an Observogram git ref
+(`--observogram ../Observogram --ref origin/develop`), materialises the packs' recording rules into
+`stack/prometheus/rules-reference/` (a directory Prometheus loads and `check-rules` ignores), imports
+the boards into Grafana's "Reference packs (generated)" folder and reports which recording rules
+produce samples and which board panels return data, are empty or error.
+
+The Kafka node (`stack/kafka/`, services `kafka`, `kafka-exporter`, `kafka-gen`) is Apache Kafka
+3.9.2 in KRaft mode, one broker, replication factor 1, with Prometheus' JMX exporter as a javaagent
+(the Strimzi rule set, job `kafka-broker`) and kafka_exporter (job `kafka-exporter`); `kafka-gen`
+keeps two topics moving with the broker image's own tools (`orders` at 50 msg/s, `payments` at
+10 msg/s, a committing consumer group on each), so the pack's topic, consumer-lag and request panels
+have data. It is not part of the MQ pack: no MQ rule, board or harness check reads it. The Grafana
+service also does what the grafana pack expects a real Grafana to do: it exports its own traces to
+Tempo, instruments its database queries, evaluates one Grafana-managed alert rule
+(`stack/grafana/provisioning/alerting/heartbeat.yaml`, fires if Prometheus stops scraping itself)
+and receives one form login every five minutes from `grafana-login-canary` (the pack's declared
+synthetic); Prometheus sends a quarter of its own traces to Tempo the same way.
 
 ## Versions
 
 MQ `icr.io/ibm-messaging/mq:10.0.0.5-r1` (switch to `9.4.5.1-r1` via `MQ_IMAGE_TAG`),
 mq_prometheus built from `ibm-messaging/mq-metric-samples@v6.0.0`, `ibmmq` npm 2.1.x
 (OTel propagation built in), otelcol-contrib 0.161.0, Prometheus 3.14, Alertmanager
-0.34, Loki 3.7.7, Tempo 2.10.1, Grafana 12.4.11. Tempo rather than Jaeger 2.x on
+0.34, Loki 3.7.7, Tempo 2.10.1, Grafana 12.4.11; the reference-pack target is Apache Kafka 3.9.2
+(`apache/kafka`, KRaft) with jmx_exporter 1.6.0 and kafka_exporter v1.10.0, and the login canary
+is curl 8.22.0. Tempo rather than Jaeger 2.x on
 purpose: Jaeger 2.21 removed the v1 HTTP query API and Grafana's Jaeger datasource
 speaks only that API, so trace panes and log→trace links would be dead.
 
@@ -191,7 +220,7 @@ speaks only that API, so trace panes and log→trace links would be dead.
 
 ```
 packs/ibmmq.pack.yaml          the contract
-stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana
+stack/                         executable form: mq, mq-exporter, otelcol, prometheus, alertmanager, loki, tempo, grafana; kafka/ (the reference-pack target: broker image + JMX rules + traffic script)
 canary/                        Node + ibmmq + OTel: canary | producer | consumer (MODE=)
 harness/                       run.mjs, checks/{conformance,synthetic,chaos}.mjs, lib/, alert-sink/
 tools/                         validate-pack, check-rules, gen-dashboards + dashboards/ibmmq.mjs (the MQ boards), gen-burn-rules (spec.policy → Prometheus alerts), gen-site + site/ibmmq.mjs and site/templates/ (a fleet from an inventory); the generators are thin wrappers over Observogram's library in vendor/

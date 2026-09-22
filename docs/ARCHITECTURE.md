@@ -76,7 +76,7 @@ flowchart LR
 
 ### The services
 
-All twelve run under one Compose project (`mq-obs`); every host port is bound to loopback
+All sixteen run under one Compose project (`mq-obs`); every host port is bound to loopback
 in the `127.0.0.1:2xxxx` block so nothing collides with other local stacks.
 
 | Service | Image (pinned) | Role | Container port | Host port | Configuration |
@@ -89,10 +89,14 @@ in the `127.0.0.1:2xxxx` block so nothing collides with other local stacks.
 | `alert-sink` | `harness/alert-sink` (Node, no deps) | timestamped webhook ledger; stores the last certification run and serves it at `/metrics` | 9095 | 29095 | `harness/alert-sink/server.mjs` |
 | `loki` | `grafana/loki:3.7.7` | logs, OTLP ingest, 48 h retention | 3100 | 23100 | `stack/loki/loki.yaml` |
 | `tempo` | `grafana/tempo:2.10.1` | traces, OTLP ingest, 48 h retention | 3200, 4317 | 23200 | `stack/tempo/tempo.yaml` |
-| `grafana` | `grafana/grafana:12.4.11` | four provisioned dashboards, four datasources | 3000 | 23000 | `stack/grafana/provisioning/`, `stack/grafana/dashboards/*.json` (generated) |
+| `grafana` | `grafana/grafana:12.4.11` | four provisioned dashboards, four datasources, one Grafana-managed heartbeat rule; anonymous Viewer; its own traces to Tempo and `instrument_queries` on (what the grafana reference pack reads); state in the `grafana-data` volume | 3000 | 23000 | `stack/grafana/provisioning/`, `stack/grafana/dashboards/*.json` (generated) |
+| `grafana-login-canary` | `curlimages/curl:8.22.0` | one form login every 5 min (the grafana pack's login SLI) | | | `stack/grafana/login-canary.sh` |
 | `canary` | `mq-obs/canary:local` (`canary/`) | synthetic put/get probe every 10 s on `APP.CANARY` | | | env in `docker-compose.yaml` |
 | `producer` | same image, `MODE=producer` | 5 persistent orders/s to `APP.ORDERS.REQ`, one PRODUCER span each | | | |
 | `consumer` | same image, `MODE=consumer` | blocking gets from `APP.ORDERS.REQ`, one CONSUMER span each, linked to the producer's | | | |
+| `kafka` | `mq-obs/kafka:3.9.2` (`stack/kafka/`, `apache/kafka:3.9.2` + jmx_exporter 1.6.0) | the kafka reference pack's live target: one KRaft node, RF 1, broker MBeans on :9404 through the Strimzi rule set | 9092, 29092, 9404 | 29092, 29404 | `stack/kafka/Dockerfile`, `jmx-kafka.yml` |
+| `kafka-exporter` | `danielqsj/kafka-exporter:v1.10.0` | topics, partitions, replicas, consumer-group offsets and lag | 9308 | 29308 | command in `docker-compose.yaml` |
+| `kafka-gen` | same image as `kafka`, `gen.sh` | topics `orders` (50 msg/s) and `payments` (10 msg/s), a committing consumer group on each, from the broker image's own tools | | | `stack/kafka/gen.sh` |
 
 Loki and Tempo are distroless images (no shell), so they carry no Compose healthcheck; the
 harness probes their `/ready` itself and records time-to-ready (Loki needs about five minutes
@@ -184,8 +188,10 @@ Every exporter gauge is read through `last_over_time(...[30s])`; the reason is i
 
 ### 2.2 Metrics plane: two vantage points, one path
 
-**Prometheus scrapes nothing but itself and Alertmanager.** Every application series arrives
-by remote write from the collector, whose `prometheus` receiver owns four scrape jobs:
+**Prometheus scrapes itself, Alertmanager, Grafana, Loki, Tempo and the lab's Kafka node** (the
+reference-pack targets, jobs `prometheus-self`, `alertmanager`, `grafana`, `loki`, `tempo`,
+`kafka-broker`, `kafka-exporter`; `stack/prometheus/prometheus.yml`). Every MQ and application
+series arrives by remote write from the collector, whose `prometheus` receiver owns four scrape jobs:
 
 | Job | Target | What it is | Labels added |
 |---|---|---|---|

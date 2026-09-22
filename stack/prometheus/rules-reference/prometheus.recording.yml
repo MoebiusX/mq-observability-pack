@@ -1,5 +1,5 @@
 # Recording rules of Observogram's prometheus reference pack (prometheus 1.0.0), materialised by
-# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (a5945fb) reference-packs/prometheus.pack.yaml
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git codex/refpacks-live-names (3814a79) reference-packs/prometheus.pack.yaml
 # spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
 # ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
 # edit: rerun the tool. Skipped (the policy generates them with labels): prometheus:errorbudget:burn_1h.
@@ -12,9 +12,7 @@ groups:
       - record: prometheus:scrape_success:error_ratio_5m
         expr: 1 - prometheus:scrape_success:ratio_5m
       - record: prometheus:scrape_duration:p99_5m
-        expr: |
-          histogram_quantile(0.99,
-            sum by (le)(rate(scrape_duration_seconds_bucket[5m])))
+        expr: max(quantile_over_time(0.99, scrape_duration_seconds[5m]))
       - record: prometheus:wal_integrity:ratio_5m
         expr: |
           (sum(rate(prometheus_tsdb_wal_truncations_total[5m])) -
@@ -28,7 +26,7 @@ groups:
       - record: prometheus:query_latency:p99_5m
         expr: |
           histogram_quantile(0.99,
-            sum by (le)(rate(prometheus_engine_query_duration_seconds_bucket[5m])))
+            sum by (le)(rate(prometheus_http_request_duration_seconds_bucket{handler=~"/api/v1/query|/api/v1/query_range"}[5m])))
       - record: prometheus:query_concurrency:saturation_5m
         expr: |
           max(

@@ -229,9 +229,19 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
       GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+      # Loopback-only lab: boards open (and screenshot) without a login; the admin user stays.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # What Observogram's grafana reference pack reads and Grafana does not emit by default:
+      # the database query histogram (its database SLI) and Grafana's own traces to Tempo
+      # through the collector (its "Recent traces" panel).
+      GF_DATABASE_INSTRUMENT_QUERIES: "true"
+      GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS: otel-collector:4317
+      GF_TRACING_OPENTELEMETRY_OTLP_PROPAGATION: w3c
     volumes:
       - ./stack/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./stack/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana   # the imported reference-pack boards survive a recreate
     ports:
       - "127.0.0.1:23000:3000"
     depends_on:
@@ -243,6 +253,23 @@ services:
       interval: 3s
       timeout: 2s
       retries: 45
+
+  # The grafana reference pack's login SLI needs form logins; nothing else in the lab makes any
+  # (basic auth counts as an authentication, not a login). One POST /login every 5 minutes.
+  grafana-login-canary:
+    <<: *lab_service
+    image: curlimages/curl:${CURL_TAG:-8.22.0}
+    entrypoint: ["/bin/sh", "/canary/login-canary.sh"]
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_USER: admin
+      GRAFANA_PASSWORD: admin
+      LOGIN_INTERVAL: "300"
+    volumes:
+      - ./stack/grafana/login-canary.sh:/canary/login-canary.sh:ro
+    depends_on:
+      grafana:
+        condition: service_healthy
 
   # ---------------------------------------------------------------- Canary
   # Node + ibmmq (MQI) + OTel SDK. Same image, three roles.
@@ -305,6 +332,82 @@ services:
       canary:
         condition: service_started
 
+  # ----------------------------------------------------------------- Kafka
+  # A single KRaft node, the live target of Observogram's kafka reference pack (validated like
+  # the grafana and prometheus packs: tools/reference-packs.mjs). Prometheus scrapes it directly
+  # (stack/prometheus/prometheus.yml, jobs kafka-broker and kafka-exporter, the names the pack's
+  # SLIs select on). Not part of the MQ pack: no MQ rule, board or harness check reads it.
+  kafka:
+    <<: *lab_service
+    build:
+      context: ./stack/kafka
+      args:
+        KAFKA_TAG: ${KAFKA_TAG:-3.9.2}
+        CURL_TAG: ${CURL_TAG:-8.22.0}
+    image: mq-obs/kafka:${KAFKA_TAG:-3.9.2}
+    environment:
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://127.0.0.1:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # Prometheus' JMX exporter as a javaagent: the broker's MBeans on :9404 (stack/kafka/jmx-kafka.yml)
+      KAFKA_OPTS: -javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=9404:/opt/jmx/kafka.yml
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:29092:29092"   # EXTERNAL listener for host clients (kcat, kafka-console-*)
+      - "127.0.0.1:29404:9404"    # broker metrics (JMX exporter)
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9092"]   # the client listener accepts
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  # kafka_exporter: topics, partitions, replicas and consumer-group offsets as an admin client.
+  kafka-exporter:
+    <<: *lab_service
+    image: danielqsj/kafka-exporter:${KAFKA_EXPORTER_TAG:-v1.10.0}
+    command: ["--kafka.server=kafka:9092", "--web.listen-address=:9308"]
+    ports:
+      - "127.0.0.1:29308:9308"
+    # No compose healthcheck: the image carries only the exporter binary. Prometheus' up{} says.
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Traffic: two topics, a committing consumer group and a steady producer on each (gen.sh).
+  kafka-gen:
+    <<: *lab_service
+    mem_limit: 1g                 # four small JVMs from the broker image's own tools
+    build:
+      context: ./stack/kafka
+      args:
+        KAFKA_TAG: ${KAFKA_TAG:-3.9.2}
+        CURL_TAG: ${CURL_TAG:-8.22.0}
+    image: mq-obs/kafka:${KAFKA_TAG:-3.9.2}
+    entrypoint: ["/opt/lab/gen.sh"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_ORDERS_RATE: ${KAFKA_ORDERS_RATE:-50}
+      KAFKA_PAYMENTS_RATE: ${KAFKA_PAYMENTS_RATE:-10}
+      KAFKA_HEAP_OPTS: -Xmx128m
+    depends_on:
+      kafka:
+        condition: service_healthy
+
 secrets:
   mqAdminPassword:
     file: ./stack/mq/secrets/mqAdminPassword
@@ -317,3 +420,5 @@ volumes:
   lokidata:
   tempodata:
   otelcol-state:
+  grafana-data:
+  kafkadata:

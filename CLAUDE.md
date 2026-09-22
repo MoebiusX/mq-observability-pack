@@ -85,7 +85,12 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
    conditions false for the lab) or the inventory, render, copy the file into `stack/`, and
    restart the service that reads it. Anchors in `tools/site/ibmmq.mjs packSubstitutions` are
    exact-count: a pack edit that changes how often `[30s]` or `queue=~"APP.*"` occurs must update
-   the count there.
+   the count there. The vendored core is generic (it knows *instances*; `tools/site/ibmmq.mjs`
+   `instances` names them queue managers, `checkInventory` holds the MQ inventory rules,
+   `expectedKinds` says which `up` jobs carry `qmgr` and how queues / channels are counted);
+   `site.json.expected` is what an Observogram journey's `inventory:` check compares with live
+   `up` — the MQ inventory-rules template keeps emitting `ibmmq.inventory.yml` (with the Silent
+   alert), so the core's default inventory rules file is never rendered here.
 3. **No new npm dependencies in `harness/`** (Node >= 20 built-ins only). `canary/`
    may depend on `ibmmq` and `@opentelemetry/*` only.
 4. **Vendored code is read-only**: `vendor/observogram/` is refreshed by copying
@@ -106,8 +111,10 @@ it starts on this config; C1 waits up to 6 min and records time-to-ready.
 
 ## How the pieces are wired
 
-**Telemetry path.** Prometheus scrapes nothing but itself and Alertmanager
-(`stack/prometheus/prometheus.yml`). Every application metric arrives by remote-write
+**Telemetry path.** Prometheus scrapes itself, Alertmanager and the platform's own components
+(Grafana, Loki, Tempo) plus the lab's Kafka node (`stack/prometheus/prometheus.yml`, rendered by
+`tools/site/templates/prometheus.mjs`; those are Observogram reference-pack targets, not MQ).
+Every MQ and application metric arrives by remote-write
 from the OTel Collector, whose `prometheus` receiver owns the two MQ scrape jobs
 `ibmmq-native` (mq:9157, qmgr process liveness, `honor_labels: true`) and
 `ibmmq-exporter` (mq_prometheus as an MQ client over DEV.ADMIN.SVRCONN, queue/channel
@@ -118,6 +125,20 @@ json logs, parses MQ's JSON console format and the apps' JSON lines, and sets
 the whole batch); Loki via OTLP. Traces: OTLP to Grafana Tempo. Alerts: Prometheus,
 Alertmanager, then the `harness/alert-sink` webhook ledger. MTTD in the report is
 alert-sink `receivedAt` minus an injection instant read from the sink's own clock.
+
+**Reference-pack targets are not the MQ pack.** The lab validates Observogram's `grafana`,
+`prometheus` and `kafka` reference packs live (`npm run refpacks`, rules into
+`stack/prometheus/rules-reference/`, boards into the "Reference packs (generated)" folder). For that
+the stack carries a single-node KRaft Kafka (`stack/kafka/`: `apache/kafka` + the JMX exporter
+javaagent with the Strimzi rules + `gen.sh` traffic, jobs `kafka-broker` and `kafka-exporter`, both
+scraped by Prometheus directly with `service: kafka`) and the activity a real Grafana would have (its
+own traces to Tempo, `instrument_queries`, one Grafana-managed heartbeat rule under
+`stack/grafana/provisioning/alerting/`, a form login every 5 min from `grafana-login-canary`;
+anonymous Viewer access so boards can be read and screenshotted without a login). Nothing in
+`packs/ibmmq.pack.yaml`, `check-rules`, the harness or the MQ boards reads any of it; a Kafka fault
+can never change an MQ verdict. Grafana keeps its state in the `grafana-data` volume so imported
+boards survive a recreate. Metric names the packs get wrong are fixed upstream with the live
+exposition as evidence (Observogram `docs/catalogue-evidence/*.md`), never by editing imported boards.
 
 **Why Tempo, not Jaeger.** Jaeger 2.21 removed the v1 HTTP query API and Grafana
 12.4's Jaeger datasource speaks only that API, so Explore and log→trace links were

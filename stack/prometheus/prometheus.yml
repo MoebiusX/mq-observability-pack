@@ -1,6 +1,6 @@
 # Prometheus for the MQ lab. All application metrics arrive via remote-write
 # from the OTel Collector; Prometheus scrapes only itself and the platform's own components
-# (Alertmanager, Grafana, Loki, Tempo).
+# (Alertmanager, Grafana, Loki, Tempo) and the lab's Kafka node.
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
@@ -18,6 +18,11 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets: [ "alertmanager:9093" ]
+
+tracing:
+  endpoint: otel-collector:4317
+  insecure: true
+  sampling_fraction: 0.25
 
 scrape_configs:
   # prometheus-self: the job name Observogram's prometheus reference pack declares for a Prometheus
@@ -37,3 +42,14 @@ scrape_configs:
   - job_name: tempo
     static_configs:
       - targets: [ "tempo:3200" ]
+  # Observogram's kafka reference pack: the lab's single Kafka node (broker MBeans through the JMX
+  # exporter javaagent, topics and consumer groups through kafka_exporter); the job names are the
+  # ones the pack's SLIs select on. Not part of the MQ pack.
+  - job_name: kafka-broker
+    static_configs:
+      - targets: [ "kafka:9404" ]
+        labels: { service: kafka }
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: [ "kafka-exporter:9308" ]
+        labels: { service: kafka }

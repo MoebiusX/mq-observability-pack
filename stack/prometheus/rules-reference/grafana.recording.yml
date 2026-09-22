@@ -1,5 +1,5 @@
 # Recording rules of Observogram's grafana reference pack (grafana 1.0.0), materialised by
-# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (a5945fb) reference-packs/grafana.pack.yaml
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git codex/refpacks-live-names (3814a79) reference-packs/grafana.pack.yaml
 # spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
 # ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
 # edit: rerun the tool. Skipped (the policy generates them with labels): grafana:errorbudget:burn_1h.
@@ -26,20 +26,14 @@ groups:
       - record: grafana:database_query:p99_5m
         expr: |
           histogram_quantile(0.99,
-            sum by (le)(rate(grafana_database_query_duration_seconds_bucket[5m])))
+            sum by (le)(rate(grafana_database_queries_duration_seconds_bucket[5m])))
       - record: grafana:alerting_evaluation:ratio_5m
         expr: |
           (sum(rate(grafana_alerting_rule_evaluations_total[5m])) -
-            sum(rate(grafana_alerting_rule_evaluation_failures_total[5m]))) / (sum(rate(grafana_alerting_rule_evaluations_total[5m])))
+            (sum(rate(grafana_alerting_rule_evaluation_failures_total[5m])) or vector(0))) / (sum(rate(grafana_alerting_rule_evaluations_total[5m])))
       - record: grafana:alerting_evaluation:error_ratio_5m
         expr: 1 - grafana:alerting_evaluation:ratio_5m
       - record: grafana:plugin_request:ratio_5m
         expr: (sum(rate(grafana_plugin_request_total{status="ok"}[5m]))) / (sum(rate(grafana_plugin_request_total[5m])))
       - record: grafana:login_success:ratio_5m
-        expr: |
-          (sum(rate(grafana_api_login_post[5m])) +
-            sum(rate(grafana_api_login_oauth[5m])) +
-            sum(rate(grafana_api_login_saml[5m]))) / (sum(rate(grafana_api_login_post[5m])) +
-            sum(rate(grafana_api_login_oauth[5m])) +
-            sum(rate(grafana_api_login_saml[5m])) +
-            sum(rate(grafana_user_login_errors_total[5m])))
+        expr: (sum(rate(grafana_http_request_duration_seconds_count{handler="/login",method="POST",status_code="200"}[5m]))) / (sum(rate(grafana_http_request_duration_seconds_count{handler="/login",method="POST"}[5m]) > 0))

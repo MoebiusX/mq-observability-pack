@@ -43,19 +43,33 @@
       "track": "develop",
       "sha256": "6215f6ee71d65a80e8163b8e664fa568ad91bfcf1a85bfe93e52e49ccaa41d68"
     },
+    "lib/slug.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/slug.mjs",
+      "commit": "3ac67ef",
+      "track": "develop",
+      "sha256": "d98eb3b9e65000345b805caf6efff135219556474828d10cf40a6c76fafd7f4f"
+    },
+    "lib/site/expected.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/site/expected.mjs",
+      "commit": "7abc640",
+      "track": "develop",
+      "sha256": "9999fa6e1ab4c44a7cd1d9d785a06551a0f5b719fcf6396b3ae67401c443da38"
+    },
     "lib/site/inventory.schema.json": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/site/inventory.schema.json",
-      "commit": "0594723",
+      "commit": "5f811de",
       "track": "develop",
-      "sha256": "957f368ffd9394403c58003fc1809114facc85b7519b7862d0966540c15f0bff"
+      "sha256": "877749d38aab6aaeae76fa43c3c2738c6ef5022a6ec094b52697237c8b310b87"
     },
     "lib/site/inventory.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/site/inventory.mjs",
-      "commit": "0594723",
+      "commit": "7abc640",
       "track": "develop",
-      "sha256": "1d70b9e58a88493033b281a66e63b8b04a4cd5233e49b46e3a93505d86f63258"
+      "sha256": "184760276b8db41e5f0ed9309c7a1eda089ea018e71fd61513e4a491229e1da2"
     },
     "lib/site/timing.mjs": {
       "repo": "MoebiusX/Observogram",
@@ -74,9 +88,9 @@
     "lib/site/run.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/site/run.mjs",
-      "commit": "0594723",
+      "commit": "5f811de",
       "track": "develop",
-      "sha256": "1d1d848ce188f3a44e7c75b6d7d872d1f19fcd7d1a00921c2a21335bf71f9470"
+      "sha256": "b86b951fd50495f93fcfa0514ee7bfb1deb49c07b8fd87e20f0cd93047d21d67"
     }
   }
 }
