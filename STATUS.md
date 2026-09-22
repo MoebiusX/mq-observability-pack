@@ -2,11 +2,11 @@
 
 ## Current state (rewritten each session; the dated log below is history)
 
-- **Branches.** `main` = PR #11 merge (develop → main, 2026-09-21). `develop` = PR #12 merged
-  (2026-09-21 14:26Z: the site's expected sets, core re-vendored at Observogram 7abc640).
-  `feat/kafka-node` (2026-09-22): a single Kafka node and the activity a real Grafana has, so the
-  lab validates Observogram's kafka, grafana and prometheus reference packs live; PR open. Tag
-  `v0.2.0` = PR #3 merge.
+- **Branches.** `main` = PR #13 merge (2026-09-22 16:29Z: the Kafka node and the Grafana
+  activity, cut from `develop` so #12's commits came with it). `develop` = PR #12 merged
+  (2026-09-21 14:26Z); it lacks #13 until merged forward. `chore/refpacks-develop` (2026-09-22):
+  the reference rules re-materialised from Observogram develop after its PRs #98 and #99 merged.
+  Tag `v0.2.0` = PR #3 merge.
 - **Lab.** Up on Nitro5 since 2026-09-16; runs the files gen-site renders from
   `sites/lab.inventory.yaml`. Since 2026-09-20 12:08Z Prometheus also scrapes Grafana, Loki and
   Tempo (job names `prometheus-self`, `alertmanager`, `grafana`, `loki`, `tempo`) and loads
@@ -134,8 +134,16 @@ firing ("Firing pack alerts", "Burn-rate & forecast alerts · pending / firing",
 burn-1h tiles on kafka-slo-burn that appear after an hour). Kafka SLIs live: partition health 1,
 consumer lag 1.5 s per group, produce p99 2 ms, fetch p99 0 ms, elections 0/h. The certification
 row on the three reference unified boards is now one note saying no certification feed exists.
-`stack/prometheus/rules-reference/` is materialised from that branch (header names the ref and
-commit); rerun `npm run refpacks` after PR #98 merges so the header says `origin/develop`.
+`stack/prometheus/rules-reference/` was materialised from that branch until it merged.
+
+**After the merges (Carlos, 2026-09-22 ~18:10Z).** Observogram PR #98 (live names, honest
+certification row) and PR #99 (symmetric generated boards: every row 24 columns at one height,
+balanced tiles, bound-SLO bar gauges with pinned text below four bars, a layout invariant test)
+merged into develop (9c4f827); MQ PR #13 merged into `main`. `npm run refpacks` from
+`origin/develop` 9c4f827: 33 rule groups (134 rules) all healthy, recording rules producing
+16/16 · 15/15 · 14/14, 15 boards imported, every panel expression valid; the only empty panels
+are the alert tables with nothing firing. The rule files under `stack/prometheus/rules-reference/`
+now carry that header.
 Screenshots (1920 px, headless Chrome on the compose network, last 1 h): the four MQ boards, the
 three unified reference boards, kafka-cluster-overview / consumer-lag / throughput, grafana- and
 prometheus-overview — sent to Carlos on 2026-09-22.
