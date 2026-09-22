@@ -118,9 +118,27 @@ measured 100 ms p99 on an idle topic — `kafka_controller_kafkacontroller_newac
 for elections on KRaft, `kafka_server_brokertopicmetrics_messagesin_total` per topic; no `_bucket`
 exists for any Kafka request metric), and `generic.mjs` rendering the §10 row only for a pack that
 declares a `certification` scrape job (a note otherwise; the `pack=` matcher stays, so the MQ verdict
-never shows on another pack's board). Branch `codex/refpacks-live-names`; re-import here with
-`node tools/reference-packs.mjs --ref origin/codex/refpacks-live-names --import --validate` once
-pushed, then rerun with `origin/develop` after the merge and commit the materialised rules.
+never shows on another pack's board). Observogram PR #98 (`codex/refpacks-live-names`, thirteen
+commits: five name fixes, eight from a three-lens review — PromQL vs live, generator/goldens/tests,
+evidence honesty — that also made the kafka election rate per node (`max`), partition health
+count healthy partitions (`== bool`), the login ratio read no data between logins, and added a
+test for the certification row's positive branch; `npm test` 112/112 there).
+
+**Validated here from that branch (3814a79, 14:52Z, `--ref codex/refpacks-live-names`).**
+Recording rules producing: grafana 15/16, prometheus 15/15, kafka 11/14 at the 150 s check, and
+16/16 · 15/15 · 14/14 ten minutes later (the four threshold error-ratio records need history; all
+read 0 = healthy). Boards: grafana-unified 28/30 Prometheus targets with data, prometheus-unified
+28/30, kafka-unified 26/28, kafka-throughput 1/1, every smaller board 9/10 · 7/8 · 13/14 · 7/8 ·
+9/10 · 7/8 · 6/7 · 11/13 · 10/13 — every remaining empty panel is an alert table with nothing
+firing ("Firing pack alerts", "Burn-rate & forecast alerts · pending / firing", the two latency
+burn-1h tiles on kafka-slo-burn that appear after an hour). Kafka SLIs live: partition health 1,
+consumer lag 1.5 s per group, produce p99 2 ms, fetch p99 0 ms, elections 0/h. The certification
+row on the three reference unified boards is now one note saying no certification feed exists.
+`stack/prometheus/rules-reference/` is materialised from that branch (header names the ref and
+commit); rerun `npm run refpacks` after PR #98 merges so the header says `origin/develop`.
+Screenshots (1920 px, headless Chrome on the compose network, last 1 h): the four MQ boards, the
+three unified reference boards, kafka-cluster-overview / consumer-lag / throughput, grafana- and
+prometheus-overview — sent to Carlos on 2026-09-22.
 
 **Not done.** No OTel-instrumented Kafka client (the kafka pack's "Recent traces" stays empty by
 design); no Kafka fault injection (its alert panels show "no alert" honestly); the `mq_cert_*`

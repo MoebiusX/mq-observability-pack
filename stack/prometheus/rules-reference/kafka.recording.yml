@@ -1,5 +1,5 @@
 # Recording rules of Observogram's kafka reference pack (kafka 1.0.0), materialised by
-# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git origin/develop (54223dd) reference-packs/kafka.pack.yaml
+# tools/reference-packs.mjs from https://github.com/MoebiusX/Observogram.git codex/refpacks-live-names (3814a79) reference-packs/kafka.pack.yaml
 # spec.queries.recording_rules: ref:slis.<id> expanded to the SLI query, or (good) / (total) for a
 # ratio SLI. For live validation of the pack against this lab only; not part of the MQ pack. Do not
 # edit: rerun the tool.
@@ -12,7 +12,7 @@ groups:
       - record: kafka:broker_availability:error_ratio_5m
         expr: 1 - kafka:broker_availability:ratio_5m
       - record: kafka:partition_health:ratio_5m
-        expr: (sum(kafka_topic_partition_in_sync_replica == kafka_topic_partition_replicas)) / (count(kafka_topic_partition_replicas))
+        expr: (sum(kafka_topic_partition_in_sync_replica == bool kafka_topic_partition_replicas)) / (count(kafka_topic_partition_replicas))
       - record: kafka:partition_health:error_ratio_5m
         expr: 1 - kafka:partition_health:ratio_5m
       - record: kafka:consumer_lag:seconds_max_5m
@@ -22,19 +22,11 @@ groups:
               (rate(kafka_consumergroup_current_offset[5m]) > 0)
           )
       - record: kafka:produce_latency:p99_5m
-        expr: |
-          histogram_quantile(0.99,
-            sum by (le)(
-              rate(kafka_server_RequestMetrics_localtime_ms_bucket{request="Produce"}[5m])
-            ))
+        expr: max(kafka_network_requestmetrics_totaltimems{request="Produce",quantile="0.99"}) / 1000
       - record: kafka:fetch_latency:p99_5m
-        expr: |
-          histogram_quantile(0.99,
-            sum by (le)(
-              rate(kafka_server_RequestMetrics_localtime_ms_bucket{request="FetchConsumer"}[5m])
-            ))
+        expr: max(kafka_network_requestmetrics_localtimems{request="FetchConsumer",quantile="0.99"}) / 1000
   - name: kafka.reference.recording.1m
     interval: 1m
     rules:
       - record: kafka:controller_elections:rate_1h
-        expr: sum(rate(kafka_controller_ControllerStats_election_rate[1h])) * 3600
+        expr: max(rate(kafka_controller_kafkacontroller_newactivecontrollerscount[1h])) * 3600
