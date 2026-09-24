@@ -172,7 +172,10 @@ test('T4 --env prod: the site pack and the burn rules carry the production timin
   assert.equal(fors.qmgr_process_up_99_9_burn_14x_5m_1h, '2m'); assert.equal(fors.qmgr_process_up_99_9_burn_6x_30m_6h, '5m');
   assert.equal(fors.message_age_99_under_60s_burn_4x_1h_6h, '10m'); assert.equal(fors.log_latency_99_under_20ms_burn_8x_15m_2h, '5m');
   const recorded = rules.filter(x => x.record).map(x => x.expr);
-  assert.deepEqual(parseYaml(text).spec.queries.recording_rules.filter(x => x.labels?.slo).map(x => x.expr), recorded, 'pack snippet and burn file agree (what check-rules compares)');
+  // The generated block is every recording rule carrying `service` (the per-SLI error ratios carry
+  // { sli, service } since the spec-1.3 generator; the burn rates { slo, sli, service }); the hand-written
+  // ref:slis rules carry no labels.
+  assert.deepEqual(parseYaml(text).spec.queries.recording_rules.filter(x => x.labels?.service).map(x => x.expr), recorded, 'pack snippet and burn file agree (what check-rules compares)');
   assert.ok(recorded.every(e => !/:10s\]/.test(e)));
   const m = p.manifest;
   assert.equal(m.timing.step, 30); assert.equal(m.timing.rendered.window3, '90s'); assert.equal(m.timing.probe, 30);
