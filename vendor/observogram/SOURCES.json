@@ -4,9 +4,9 @@
     "lib/validator.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/validator.mjs",
-      "commit": "c819ff7",
+      "commit": "10919d5",
       "track": "develop",
-      "sha256": "bd1a4f404a5304d6d0baa1bdf3ecfc6073f2fa6fa4c9a49acbf72cf59cfb6b04"
+      "sha256": "0b0ba326cb41f95b8a53a518de291d1c2c56e141540cf6f42bda544c86f37ed2"
     },
     "lib/mini-yaml.mjs": {
       "repo": "MoebiusX/Observogram",
@@ -17,31 +17,38 @@
     },
     "observability-pack.schema.json": {
       "repo": "MoebiusX/Observogram",
-      "path": "vendor/observability-pack-spec/v1.2/observability-pack.schema.json",
-      "commit": "c44cc73",
+      "path": "vendor/observability-pack-spec/v1.3/observability-pack.schema.json",
+      "commit": "10919d5",
       "track": "develop",
-      "sha256": "4be376656efc877cd2f907d1714549ca0fd679e969ac426303966267ff21fbaf"
+      "sha256": "4c3377421701009b52098d00d1fdaa98fb27c7810db1503ed03e4037ecb6f29c"
     },
     "lib/dashboards/lib.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/dashboards/lib.mjs",
-      "commit": "c42ced3",
+      "commit": "10919d5",
       "track": "develop",
-      "sha256": "e24783349c1c42f44f27f48ac77f12d5c3f3ddf95d64578129c17d78bf9fbad8"
+      "sha256": "6a7140c6be95ef2ea8c100e72914f635ae33a27df24b55d8722fb948f9791282"
     },
     "lib/dashboards/generic.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/dashboards/generic.mjs",
-      "commit": "bc36ad7",
+      "commit": "10919d5",
       "track": "develop",
-      "sha256": "8861d96ff7983efcadf6da2708577b25b9b2976ac6c5909ea092045024ca1ed8"
+      "sha256": "f02f24c9f0d967afa4a0f9dfd0846cceb960b065c772f78eaf21c0cbf151a959"
     },
     "lib/burn-rules.mjs": {
       "repo": "MoebiusX/Observogram",
       "path": "tools/lib/burn-rules.mjs",
-      "commit": "c42ced3",
+      "commit": "10919d5",
       "track": "develop",
-      "sha256": "6215f6ee71d65a80e8163b8e664fa568ad91bfcf1a85bfe93e52e49ccaa41d68"
+      "sha256": "4ae27bf6b1805fea24fb1cee2b71a00e02da6fbcb54417677b79a88c4021664b"
+    },
+    "lib/good-when.mjs": {
+      "repo": "MoebiusX/Observogram",
+      "path": "tools/lib/good-when.mjs",
+      "commit": "10919d5",
+      "track": "develop",
+      "sha256": "f89b81ef3c6afc30a60453deee4cc659503ec16f720351fcb61991766337e474"
     },
     "lib/slug.mjs": {
       "repo": "MoebiusX/Observogram",

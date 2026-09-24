@@ -188,15 +188,17 @@
         "total":          { "type": "string" },
         "query":          { "type": "string" },
         "threshold":      { "type": "number" },
+        "good_when":      { "type": "string", "enum": ["below", "above"], "default": "below",
+                            "description": "Which side of `threshold` is good (spec 1.3). `below` (the default, and the meaning every 1.2 pack already has): a sample is good when it is at or below the bound — latency, lag, error rate, queue age. `above`: the bound is a floor and a sample is good when it is at or above it — in-sync replicas, free capacity, connected consumers, throughput. Only allowed on `threshold` and `distribution` SLIs; absent means `below`." },
         "unit":           { "type": "string" },
         "percentile":     { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
         "expression":     { "type": "string" }
       },
       "allOf": [
-        { "if": { "properties": { "type": { "const": "ratio" } } },        "then": { "required": ["good","total"] } },
+        { "if": { "properties": { "type": { "const": "ratio" } } },        "then": { "required": ["good","total"],                  "properties": { "good_when": { "not": {} } } } },
         { "if": { "properties": { "type": { "const": "threshold" } } },    "then": { "required": ["query","threshold"] } },
         { "if": { "properties": { "type": { "const": "distribution" } } }, "then": { "required": ["query","percentile","threshold"] } },
-        { "if": { "properties": { "type": { "const": "custom" } } },       "then": { "required": ["expression"] } }
+        { "if": { "properties": { "type": { "const": "custom" } } },       "then": { "required": ["expression"],                    "properties": { "good_when": { "not": {} } } } }
       ]
     },
 
