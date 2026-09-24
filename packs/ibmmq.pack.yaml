@@ -209,6 +209,7 @@ spec:
         )
       threshold: 0.8
       unit: ratio
+      good_when: below   # a ceiling on depth / MAXDEPTH (spec 1.3 states the direction; the default)
 
     # --- Consumer freshness ---
     - id: oldest_message_age
@@ -382,23 +383,23 @@ spec:
       - name: ibmmq:queue_depth_headroom:error_ratio_5m
         expr: '(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30)'
         interval: 30s
-        labels: { slo: queue_headroom_99_9, sli: queue_depth_headroom, service: ibmmq }
+        labels: { sli: queue_depth_headroom, service: ibmmq }
       - name: ibmmq:oldest_message_age:error_ratio_5m
         expr: '(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30)'
         interval: 30s
-        labels: { slo: message_age_99_under_60s, sli: oldest_message_age, service: ibmmq }
+        labels: { sli: oldest_message_age, service: ibmmq }
       - name: ibmmq:dlq_depth:error_ratio_5m
         expr: '(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30)'
         interval: 30s
-        labels: { slo: dlq_empty_99_9, sli: dlq_depth, service: ibmmq }
+        labels: { sli: dlq_depth, service: ibmmq }
       - name: ibmmq:canary_roundtrip_p99:error_ratio_5m
         expr: '(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30)'
         interval: 30s
-        labels: { slo: canary_latency_99_p99_500ms, sli: canary_roundtrip_p99, service: ibmmq }
+        labels: { sli: canary_roundtrip_p99, service: ibmmq }
       - name: ibmmq:log_write_latency:error_ratio_5m
         expr: '(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30)'
         interval: 30s
-        labels: { slo: log_latency_99_under_20ms, sli: log_write_latency, service: ibmmq }
+        labels: { sli: log_write_latency, service: ibmmq }
       - name: ibmmq:errorbudget:burn_5m
         expr: '(sum(sum_over_time((1 - (up{job="ibmmq-native"} == bool 1))[5m:10s])) / ((count(up{job="ibmmq-native"})) * 30)) / 0.001'
         interval: 30s

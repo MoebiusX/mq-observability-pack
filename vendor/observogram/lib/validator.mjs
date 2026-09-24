@@ -1,9 +1,18 @@
 // tools/lib/validator.mjs
 //
-// Shared JSON Schema 2020-12 walker (subset) + ObservabilityPack v1.2
-// gatekeeper. Used by tools/validate-pack.mjs (CLI) and server/index.mjs
-// (POST /api/validate, GET /api/packs/:id). Pure ESM — no Node APIs — so a
-// future browser-side validation path can import the same module.
+// Shared JSON Schema 2020-12 walker (subset) + ObservabilityPack gatekeeper
+// for the vendored spec (SPEC_VERSION; the schema at SPEC_SCHEMA_PATH). Used by
+// tools/validate-pack.mjs (CLI) and server/index.mjs (POST /api/validate,
+// GET /api/packs/:id). Pure ESM — no Node APIs — so a future browser-side
+// validation path can import the same module.
+//
+// Spec 1.3 (RFC-0002) adds `good_when: below | above` to threshold and
+// distribution SLIs and forbids it on ratio and custom ones through a `not`
+// sub-schema (`properties.good_when: { not: {} }` in their if/then branches)
+// rather than the boolean `false`: this walker evaluates `not` (below) but
+// skips a boolean sub-schema, and upstream chose the form this walker enforces.
+// A misplaced field therefore reads `$.spec.slis[N].good_when: matches
+// forbidden 'not' schema`; a bad value `not in enum ["below","above"]`.
 //
 // Supported keywords:
 //   type, enum, const, pattern, minLength, maxLength,
@@ -16,7 +25,10 @@
 
 export const REQUIRED_API_VERSION = 'observability.platform/v1';
 export const REQUIRED_KIND = 'ObservabilityPack';
-export const SPEC_VERSION = '1.2';
+export const SPEC_VERSION = '1.3';
+/** The vendored spec directory and its schema, relative to the repo root (Node callers resolve them; plain strings, browser-safe). */
+export const SPEC_DIR = `vendor/observability-pack-spec/v${SPEC_VERSION}`;
+export const SPEC_SCHEMA_PATH = `${SPEC_DIR}/observability-pack.schema.json`;
 
 const URI_RE       = /^[a-z][a-z0-9+.-]*:\S+$/i;
 const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -148,7 +160,7 @@ export function validate(value, schema, path, errors, root) {
   }
 }
 
-// Returns null if `pack` looks like a canonical v1.2 manifest, or an error
+// Returns null if `pack` looks like a canonical manifest, or an error
 // message string otherwise. Cheap pre-check before running the full walker.
 export function gatekeep(pack) {
   if (pack?.apiVersion !== REQUIRED_API_VERSION || pack?.kind !== REQUIRED_KIND) {

@@ -2,11 +2,12 @@
 
 ## Current state (rewritten each session; the dated log below is history)
 
-- **Branches.** `main` = PR #13 merge (2026-09-22 16:29Z: the Kafka node and the Grafana
-  activity, cut from `develop` so #12's commits came with it). `develop` = PR #12 merged
-  (2026-09-21 14:26Z); it lacks #13 until merged forward. `chore/refpacks-develop` (2026-09-22):
-  the reference rules re-materialised from Observogram develop after its PRs #98 and #99 merged.
-  Tag `v0.2.0` = PR #3 merge.
+- **Branches.** `main` = PR #14 merge 7b22792 (2026-09-23: the reference rules re-materialised
+  from Observogram develop 9c4f827); `develop` fast-forwarded to the same commit. Open:
+  `chore/vendor-spec-1-3` → PR #15 (2026-09-24): the vendored generators refreshed to Observogram
+  develop 10919d5 (spec 1.3, `good_when`), the burn rules regenerated, the pack's snippet pasted,
+  `queue_depth_headroom` stating `good_when: below`, T4 selecting the generated block by
+  `labels.service`. Tag `v0.2.0` = PR #3 merge.
 - **Lab.** Up on Nitro5 since 2026-09-16; runs the files gen-site renders from
   `sites/lab.inventory.yaml`. Since 2026-09-20 12:08Z Prometheus also scrapes Grafana, Loki and
   Tempo (job names `prometheus-self`, `alertmanager`, `grafana`, `loki`, `tempo`) and loads
@@ -14,8 +15,12 @@
   node (jobs `kafka-broker`, `kafka-exporter`; services `kafka`, `kafka-exporter`, `kafka-gen`) and
   the kafka reference pack's rules are materialised too; Grafana was recreated at 13:48Z with a
   data volume, anonymous Viewer, `instrument_queries`, tracing to Tempo, one Grafana-managed
-  heartbeat rule and a form-login canary. Last `certify:quick`: PASS 16/16 at 2026-09-22 14:05:46Z
-  (see the 2026-09-22 entry).
+  heartbeat rule and a form-login canary. **Rebuilt 2026-09-24** (~12:35Z): Docker Desktop would
+  not start (a stale `%LOCALAPPDATA%\Docker\run\dockerInference` socket its Inference manager
+  could not remove; the `run` directory moved aside and Docker recreated it), the containers and
+  images were gone, the seven `mq-obs_*` volumes intact, `npm run up` rebuilt cold. Last
+  `certify:quick`: PASS 16/16 at 2026-09-24 12:51:32Z (see the 2026-09-24 entry); the 2026-09-16
+  full report is re-published to the alert-sink.
 - **The lab is a rendered site.** `npm run site` renders it; every generated file with a twin
   under `stack/` is byte-identical (`tools/test-site.mjs` T10, in `npm test`). The generic
   core is Observogram's `tools/lib/site/*` (PR #90 merged; since 2026-09-21 generic *instances*
@@ -30,18 +35,19 @@
   with live `up` (per kind up / down / silent / unexpected; Advanced → Neuron shows it) — not
   yet run against this lab: it has no MCP gateway in front of Prometheus.
 - **Generators.** Observogram library (`tools/lib/dashboards/`, `tools/lib/burn-rules.mjs`,
-  `tools/lib/site/`; PRs #87, #88, #89 (compile wiring) and #90 (gen-site core) all merged,
-  `develop` a5945fb), vendored with commit and hash per file (`vendor/observogram/SOURCES.json`,
-  `tools/check-pins.mjs`). **Pending re-vendor:** #89 changed `burn-rules.mjs`, `dashboards/lib.mjs`
-  and `dashboards/generic.mjs` after the copies here (c42ced3 / bc36ad7); refresh them in their own
-  PR and prove `npm run generate` stays a no-op (or paste the new `--pack-snippet` and recertify).
-  Measured 2026-09-21 with develop bb0ad6a: it is NOT a no-op — `ibmmq.burn.yml` loses the `slo:`
-  label on five rules (queue_headroom_99_9, message_age_99_under_60s, dlq_empty_99_9,
-  canary_latency_99_p99_500ms, log_latency_99_under_20ms), check-rules reports 5 pack-snippet
-  problems, and two new compile warnings (canary_success's derived good leg wants `or vector(0)`;
-  queue_depth_headroom's threshold direction) fail `site:check --strict`. That PR pastes the new
-  snippet, decides the two warnings in the pack, and recertifies quick on the lab. The site core
-  no longer needs it: `metricPrefix` now comes from the leaf `vendor/observogram/lib/slug.mjs`.
+  `tools/lib/good-when.mjs`, `tools/lib/site/`), vendored with commit and hash per file
+  (`vendor/observogram/SOURCES.json`, `tools/check-pins.mjs`). Since PR #15 the generator copies
+  and the schema sit at Observogram develop 10919d5 = **ObservabilityPack spec 1.3**
+  (`good_when: below | above` on threshold SLIs, absent = below; upstream
+  `otel-observability-pack@98be4ae`, RFC-0002). The re-vendor was not a no-op, as measured on
+  2026-09-21: the five per-SLI `error_ratio_5m` recording rules dropped their `slo:` label (the
+  rule is per SLI; the SLO label stays on the burn rates), the pack's generated block is the fresh
+  `--pack-snippet`, and of the two expected compile warnings one is decided in the pack
+  (`queue_depth_headroom: good_when: below` — the same ceiling, stated) and the other
+  (canary_success's `or vector(0)`) no longer arises with this generator. `site:check --strict`,
+  check-rules and `npm test` are green; the four boards regenerate byte-identical. No lab SLI is a
+  floor today, so nothing declares `above`; the site core still takes `metricPrefix` from the leaf
+  `vendor/observogram/lib/slug.mjs`.
 - **Feedback status.** (1) fleet/site generator: increment 1 done (inventory v1, multi-environment
   inheritance and partitions, exact-count pack anchors, every stack file as a template, per-qmgr
   exporter and canary config, file_sd, inventory rules, fleet Alertmanager, registry adapter
@@ -59,6 +65,48 @@
   `rule_labels: true`); label names (`environment` / `deployment.environment` assumed); prod
   vantage (dual assumed: MQ SERVICE local exporter + client exporter); environment set
   (prod/staging/lab assumed).
+
+## 2026-09-24 — spec 1.3 re-vendor: `good_when`, per-SLI error-ratio rules, the lab rebuilt
+
+**Ask:** close the pending re-vendor now that Observogram adopted ObservabilityPack spec 1.3
+(Observogram #106; the spec change itself is otel-observability-pack PR #8, RFC-0002, accepted
+2026-09-23 after the maintainer asked for a threshold direction so a floor is no longer "a ratio
+SLI in disguise").
+
+**What changed (PR #15, two commits + this STATUS).** `vendor/observogram/` refreshed verbatim to
+develop 10919d5: `burn-rules.mjs` (floor legs `< bool` under the bound for `above`; the warnings;
+the per-SLI error-ratio rule labelled `{ sli, service }`), `dashboards/lib.mjs` and `generic.mjs`
+(threshold tiles and dashed lines follow the direction, descriptions name it), `validator.mjs`
+(SPEC_VERSION 1.3), the new `good-when.mjs`, and the 1.3 schema (Observogram no longer carries
+v1.2). `gen-sources.mjs` maps the new paths; SOURCES.json re-pinned; check-pins ✓ 14 files.
+`npm run generate` changed one file: `ibmmq.burn.yml` lost the `slo:` label on the five
+threshold error-ratio recording rules — expressions, alerts and forecasts byte-identical — so the
+pack's generated block was replaced by the fresh `--pack-snippet` (rule 2) and check-rules
+compares equal again. `queue_depth_headroom` (threshold 0.8 on depth / MAXDEPTH, unit ratio)
+declares `good_when: below`: unchanged semantics, the generator's "unit ratio looks like a floor"
+hint gone. T4 in `tools/test-site.mjs` selected the generated block by `labels.slo`; it now uses
+`labels.service`.
+
+**Measured.** `npm test` 22/22 · check-rules ✓ 19 recording / 29 alert rules / 4 boards ·
+`site:check --strict` ok (prod, staging) · promtool check rules SUCCESS 11 / 12 / 38 inside the
+running Prometheus · promtool unit tests SUCCESS · **`certify:quick` PASS 16/16 at 12:51:32Z**
+(C1 Loki ready after 15 s; S4 `headroom 0.000 ≤ 0.8`) · `verify:dashboards` 93 queries with data,
+15 empty (certification metrics before a full run, and the no-alert panels), 9 masked (the
+documented `vector(0)` fallbacks), 0 errors · the 2026-09-16 full report re-published to the
+alert-sink (`--publish`) so the validation row reads again.
+
+**Docker incident.** Docker Desktop 29.5.3 refused to start: "initializing Inference manager …
+remove …\Docker\run\dockerInference: The file cannot be accessed by the system". The socket file
+(a zero-byte reparse point from 2026-09-16) cannot be deleted by `del`, `Remove-Item` or `fsutil
+reparsepoint delete` (error 1920); renaming `%LOCALAPPDATA%\Docker\run` aside with no docker
+process running and relaunching Docker Desktop works (it recreates `run/`; the daemon answered
+after ~2 min). The lab's containers and images did not survive; every `mq-obs_*` volume did, and
+`npm run up` rebuilt cold in about ten minutes.
+
+**Next.** Nothing pending on the MQ side for 1.3. If a floor SLI ever enters the pack (a
+minimum of connected consumers, in-sync channels), it declares `good_when: above` and the
+generator, boards and rubric already know what to do. The Observogram side continues in a cloud
+session from `docs/HANDOVER.md` there.
 
 ## 2026-09-22 — a Kafka node in the lab, and why the reference-pack boards were empty
 

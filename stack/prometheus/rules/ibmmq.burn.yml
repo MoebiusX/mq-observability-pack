@@ -12,31 +12,26 @@ groups:
       - record: ibmmq:queue_depth_headroom:error_ratio_5m
         expr: "(sum_over_time((max(ibmmq:queue_depth_headroom:ratio) > bool 0.8)[5m:10s]) / 30)"
         labels:
-          slo: queue_headroom_99_9
           sli: queue_depth_headroom
           service: ibmmq
       - record: ibmmq:oldest_message_age:error_ratio_5m
         expr: "(sum_over_time((max(ibmmq:oldest_message_age:seconds_max) > bool 60)[5m:10s]) / 30)"
         labels:
-          slo: message_age_99_under_60s
           sli: oldest_message_age
           service: ibmmq
       - record: ibmmq:dlq_depth:error_ratio_5m
         expr: "(sum_over_time((max(ibmmq:dlq_depth:max) > bool 0)[5m:10s]) / 30)"
         labels:
-          slo: dlq_empty_99_9
           sli: dlq_depth
           service: ibmmq
       - record: ibmmq:canary_roundtrip_p99:error_ratio_5m
         expr: "(sum_over_time((max(ibmmq:canary_roundtrip:p99_5m) > bool 0.5)[5m:10s]) / 30)"
         labels:
-          slo: canary_latency_99_p99_500ms
           sli: canary_roundtrip_p99
           service: ibmmq
       - record: ibmmq:log_write_latency:error_ratio_5m
         expr: "(sum_over_time((max(ibmmq:log_write_latency:seconds) > bool 0.02)[5m:10s]) / 30)"
         labels:
-          slo: log_latency_99_under_20ms
           sli: log_write_latency
           service: ibmmq
       - record: ibmmq:errorbudget:burn_5m
